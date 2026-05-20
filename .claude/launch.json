@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "rota-app",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "streamlit", "run", "rota_app.py", "--server.headless", "true", "--server.port", "8501", "--server.runOnSave", "true"],
+      "port": 8501
+    }
+  ]
+}

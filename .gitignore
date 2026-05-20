@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Local Streamlit state (per-machine cache; not part of source)
+.streamlit/secrets.toml
+
+# State files live under ~/.claude/scheduled-tasks/ — never inside the repo,
+# but listed defensively in case anything escapes during dev.
+*.bak
+state.json
+week_*.json
+lunch_cover_*.json
+scheduled_*.json

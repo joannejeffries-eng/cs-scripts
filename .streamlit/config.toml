@@ -1,0 +1,17 @@
+# Shared theme for all CS Streamlit apps (rota_app + tl_app_*).
+# Light, Juno-branded, generous whitespace.
+
+[theme]
+base = "light"
+primaryColor = "#0F5CB8"                 # Juno blue — buttons, links, focus
+backgroundColor = "#FFFFFF"              # main canvas
+secondaryBackgroundColor = "#F4F7FB"     # sidebar + secondary panels
+textColor = "#1A1A1A"                    # near-black for readability
+font = "sans serif"
+
+[client]
+showErrorDetails = true
+toolbarMode = "minimal"
+
+[server]
+runOnSave = true
