@@ -703,6 +703,172 @@ def sync_rota_into_week(week_data, friday, assignments_fri=None, assignments_mon
     return changes
 
 
+def _parse_time_to_hours(s: str):
+    """'1:30pm' / '17:30' / '4' / '8.30' → fractional hours 0-24 (or None)."""
+    s = s.strip().lower().replace(' ', '')
+    is_pm = is_am = False
+    if s.endswith('pm'):
+        is_pm = True; s = s[:-2]
+    elif s.endswith('am'):
+        is_am = True; s = s[:-2]
+    s = s.replace('.', ':')
+    if ':' in s:
+        try:
+            h, m = s.split(':', 1)
+            hours = int(h) + int(m) / 60
+        except ValueError:
+            return None
+    else:
+        try:
+            hours = float(s)
+        except ValueError:
+            return None
+    if is_pm and hours < 12:
+        hours += 12
+    elif is_am and hours == 12:
+        hours = 0
+    return hours
+
+
+def parse_time_range_hours(s: str):
+    """Parse a Daily Notes time range → duration in fractional hours.
+
+    Handles all the formats Jo's team uses:
+      '2 - 5'           → 3.0    (afternoon — both < 8 → both PM)
+      '1:30 - 5'        → 3.5    (afternoon)
+      '11:45-2'         → 2.25   (crosses noon)
+      '8-10:30'         → 2.5    (morning — both ≥ 8)
+      '4-5pm'           → 1.0    (PM marker on end → start also PM)
+      '9:00 - 5pm'      → 8.0    (PM end, start at 9 stays AM)
+      '13:30–14:00'     → 0.5    (en-dash, 24h)
+
+    Returns None if unparseable or duration ≤ 0.
+    """
+    import re as _re
+    if not s:
+        return None
+    parts = _re.split(r'\s*[-–]\s*', s.strip(), maxsplit=1)
+    if len(parts) != 2:
+        return None
+    raw_a, raw_b = parts[0].strip().lower(), parts[1].strip().lower()
+    a = _parse_time_to_hours(raw_a)
+    b = _parse_time_to_hours(raw_b)
+    if a is None or b is None:
+        return None
+    a_meridian = raw_a.endswith('am') or raw_a.endswith('pm')
+    b_meridian = raw_b.endswith('am') or raw_b.endswith('pm')
+    if not a_meridian and not b_meridian:
+        if a < 8 and b < 8:
+            a += 12; b += 12
+        elif b < a:
+            b += 12
+    elif b_meridian and not a_meridian:
+        if a < 12 and (a + 12) < b:
+            a += 12
+    duration = b - a
+    return duration if duration > 0 else None
+
+
+def autofill_splits_from_notes(week_data, notes_by_date, *,
+                                 note_keywords, segment_role,
+                                 segment_label=None):
+    """Generic autofill — splits days based on a keyword found in Daily Notes.
+
+    Idempotent:
+      - skips days that already have the same segment_role
+      - skips days where the person isn't working (absence / NWD)
+      - skips entries whose time range can't be parsed
+      - skips split hours that would leave less than 30 min for the main role
+
+    Args:
+        week_data: {name: PersonWeek}
+        notes_by_date: {date: [entry_dict]} where entry has 'name', 'time', 'note'
+        note_keywords: list of lowercase substrings to match against the note
+            (entry matches if ANY keyword is a substring)
+        segment_role: full role string for the new segment (must be in ROLE_TARGETS)
+        segment_label: short label for messages (defaults to segment_role)
+
+    Returns: [{'name', 'date', 'hours', 'status': 'applied'|'skipped', 'reason'}]
+    """
+    if segment_label is None:
+        segment_label = segment_role
+    keywords = [k.lower() for k in note_keywords]
+    results = []
+    for d, entries in notes_by_date.items():
+        for entry in entries:
+            note = (entry.get('note') or '').strip().lower()
+            if not any(k in note for k in keywords):
+                continue
+            name = (entry.get('name') or '').strip()
+            time_str = entry.get('time') or ''
+            hours = parse_time_range_hours(time_str)
+            if hours is None or hours <= 0:
+                results.append({'name': name, 'date': d, 'hours': None,
+                                'status': 'skipped',
+                                'reason': f"couldn't parse time '{time_str}'"})
+                continue
+            pw = week_data.get(name)
+            if not pw:
+                results.append({'name': name, 'date': d, 'hours': hours,
+                                'status': 'skipped',
+                                'reason': 'person not in week_data'})
+                continue
+            dr = pw.days.get(d)
+            if not dr or not dr.is_working:
+                results.append({'name': name, 'date': d, 'hours': hours,
+                                'status': 'skipped',
+                                'reason': 'day not working / not in week'})
+                continue
+            # Already split with this segment role?
+            if dr.segments and any(s.role == segment_role for s in dr.segments):
+                results.append({'name': name, 'date': d, 'hours': hours,
+                                'status': 'skipped',
+                                'reason': f'already has {segment_label} segment'})
+                continue
+            if hours >= dr.shift_hours - 0.4:
+                results.append({'name': name, 'date': d, 'hours': hours,
+                                'status': 'skipped',
+                                'reason': f"{segment_label} {hours:.2f}h ≥ shift {dr.shift_hours}h"})
+                continue
+            main_hours = round(dr.shift_hours - hours, 2)
+            spec = [(dr.role, main_hours), (segment_role, round(hours, 2))]
+            ok = split_day(pw, d, spec)
+            if not ok:
+                results.append({'name': name, 'date': d, 'hours': hours,
+                                'status': 'skipped',
+                                'reason': 'split_day returned False'})
+                continue
+            add_override(pw, f'split ({d.strftime("%a %d/%m")})',
+                          'single', dr.role,
+                          f"Autofilled from Daily Notes: {hours:.2f}h {segment_label}")
+            results.append({'name': name, 'date': d, 'hours': hours,
+                            'status': 'applied',
+                            'reason': f"split {main_hours}h main / {hours}h {segment_label}"})
+    return results
+
+
+def autofill_reward_splits_from_notes(week_data, notes_by_date):
+    """Convenience wrapper: autofills reward-time splits from Daily Notes."""
+    return autofill_splits_from_notes(
+        week_data, notes_by_date,
+        note_keywords=['reward time'],
+        segment_role='Reward time (prev week)',
+        segment_label='reward time',
+    )
+
+
+def autofill_appointment_splits_from_notes(week_data, notes_by_date):
+    """Convenience wrapper: autofills appointment splits from Daily Notes.
+    Matches both 'appointment' (Medical appointment, School appointment) and
+    'appt' (Dentist appt, School appt)."""
+    return autofill_splits_from_notes(
+        week_data, notes_by_date,
+        note_keywords=['appointment', 'appt'],
+        segment_role='Appointment',
+        segment_label='appointment',
+    )
+
+
 def _role_needs_cover(role: str) -> bool:
     """Cover is only required for Inbound phones or Triage + lender chasing.
 
