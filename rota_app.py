@@ -1474,7 +1474,7 @@ elif page == "🏆 Reward Time":
     st.caption(f"Reward week: **{reward_friday.strftime('%d %b')} (Fri)** → **{reward_end.strftime('%d %b')} (Thu)**")
 
     # Week picker
-    col_pick1, col_pick2, col_pick3 = st.columns([2, 1, 1])
+    col_pick1, col_pick2, col_pick3, col_pick4 = st.columns([2, 1, 1, 1])
     with col_pick1:
         pick_date = st.date_input(
             "View reward week containing",
@@ -1497,6 +1497,13 @@ elif page == "🏆 Reward Time":
             "🔁 Sync rota",
             use_container_width=True,
             help="Re-reads the rota and updates roles / absences (e.g. unplanned absence added after the week opened).",
+        )
+    with col_pick4:
+        st.write("")
+        autofill_clicked = st.button(
+            "🍯 Autofill from notes",
+            use_container_width=True,
+            help="Reads Daily Notes and splits days with a 'Reward time' or 'appointment' note into role + segment.",
         )
 
     # Load or initialise week data
@@ -1586,6 +1593,62 @@ elif page == "🏆 Reward Time":
                 st.rerun()
             except Exception as e:
                 st.error(f"Sync failed: {e}")
+
+    if autofill_clicked:
+        with st.spinner("Reading Daily Notes and autofilling splits…"):
+            try:
+                gc = _cached_gspread()
+                # Reward week spans two rota weeks. Load Daily Notes from both
+                # and project each entry onto the actual date.
+                fri_monday = reward_friday - timedelta(days=reward_friday.weekday())
+                mon_monday = fri_monday + timedelta(days=7)
+                notes_by_date = {}
+                for monday in (fri_monday, mon_monday):
+                    week_notes = read_daily_notes(gc, monday)
+                    for di, entries in week_notes.items():
+                        target_date = monday + timedelta(days=di)
+                        if target_date in reward_dates:
+                            notes_by_date.setdefault(target_date, []).extend(entries)
+
+                # Order matters: reward time first (typically larger blocks),
+                # then appointments. If a day has both, the first one wins and
+                # the second is skipped as 'already has segment'.
+                reward_results = rt.autofill_reward_splits_from_notes(week_data, notes_by_date)
+                appt_results   = rt.autofill_appointment_splits_from_notes(week_data, notes_by_date)
+
+                total_applied = (
+                    [('reward time', r) for r in reward_results if r['status'] == 'applied']
+                    + [('appointment',  r) for r in appt_results if r['status'] == 'applied']
+                )
+                total_skipped = (
+                    [('reward time', r) for r in reward_results if r['status'] == 'skipped']
+                    + [('appointment',  r) for r in appt_results if r['status'] == 'skipped']
+                )
+
+                if total_applied:
+                    save_week(reward_friday, week_data)
+                    st.session_state[rw_key] = week_data
+                    st.success(f"Autofilled {len(total_applied)} split(s):")
+                    for kind, r in total_applied:
+                        st.caption(
+                            f"  • {r['name']} {r['date'].strftime('%a %d/%m')} ({kind}): {r['reason']}"
+                        )
+                else:
+                    st.info("Nothing to autofill — no new reward-time or appointment notes.")
+
+                if total_skipped:
+                    with st.expander(f"⏭️ {len(total_skipped)} skipped"):
+                        for kind, r in total_skipped:
+                            hrs = f"{r['hours']:.2f}h" if r['hours'] is not None else "—"
+                            st.caption(
+                                f"  • {r['name']} {r['date'].strftime('%a %d/%m')} "
+                                f"({kind}, {hrs}): {r['reason']}"
+                            )
+
+                if total_applied:
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Autofill failed: {e}")
 
     # ── Throughput grid ──
     st.subheader("Throughput vs Targets")
