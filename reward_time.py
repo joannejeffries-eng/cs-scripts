@@ -1474,12 +1474,18 @@ def build_daily_notes_draft(friday, week_data, next_week_monday,
         shift = shifts_by_name.get(name) or _DEFAULT_SHIFTS.get(name, (9, 17))
         shift_start, shift_end = shift
 
+        # Round the reward block to the nearest 15-minute increment so the
+        # time string matches what's shown in the message (format_reward_hours
+        # rounds UP to nearest 15 min). E.g. raw 3.2h → 3.25h → 13:45 not 13:48.
+        import math
+        rounded_hours = math.ceil(hours * 4) / 4
+
         if block == 'PM':
-            start_h = shift_end - hours
+            start_h = shift_end - rounded_hours
             end_h = shift_end
         else:   # AM
             start_h = shift_start
-            end_h = shift_start + hours
+            end_h = shift_start + rounded_hours
 
         time_str = _fmt_hour(start_h) + ' - ' + _fmt_hour(end_h)
 
@@ -1496,15 +1502,17 @@ def build_daily_notes_draft(friday, week_data, next_week_monday,
 
 
 def _fmt_hour(h: float) -> str:
-    """Format a fractional hour (e.g. 13.5) as 'HH:MM' or short form.
+    """Format a fractional hour as 'HH:MM' (always with minutes).
 
-    Match the look of existing Daily Notes entries: full hours just show
-    as the hour (e.g. '5' not '5:00'); fractional shows minutes.
+    Matches Jo's preferred Daily Notes time format:
+        13.75 → '13:45'
+        17.0  → '17:00'   (always show :00 for whole hours, not bare '17')
     """
     whole = int(h)
     mins = int(round((h - whole) * 60))
-    if mins == 0:
-        return str(whole)
+    if mins == 60:
+        whole += 1
+        mins = 0
     return f"{whole}:{mins:02d}"
 
 
