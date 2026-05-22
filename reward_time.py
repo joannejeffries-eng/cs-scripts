@@ -54,7 +54,7 @@ WEEKLY_HOURS = {
 ROLE_TARGETS = {
     'Inbound phones':           (72, 82, 'inbound_calls'),
     'Triage only':              (130, 180, 'emails_archived'),
-    'Triage + lender chasing':  (130, 180, 'emails_archived'),  # triage component
+    'Triage + lender chasing':  (100, 140, 'emails_archived'),  # lower than triage-only — lender chasing takes time off the triage queue
     'Chasing':                  (95, 110, 'outbound_calls'),
     'Case setup only':          (275, 305, 'things_done'),
     'Training':                 (0, 0, 'training_minutes'),    # split-role only; auto-meets base+stretch
