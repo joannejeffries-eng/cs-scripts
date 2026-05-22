@@ -68,6 +68,43 @@ TRIAGE_ARCHIVE_RATIO_BASE = 0.85
 TRIAGE_ARCHIVE_RATIO_STRETCH = 0.87
 
 
+class CloudDBUnreachableError(RuntimeError):
+    """Raised when pull_day_data / pull_skips can't reach the Postgres DB
+    because we're on Streamlit Cloud and the DB is on Juno's private VPC.
+
+    The UI catches this specifically and shows a clear "ask Jo to pull from
+    her local app" message instead of the raw psycopg2 timeout.
+    """
+
+
+def _connect_postgres(db_url):
+    """Wrap psycopg2.connect with a friendly error when running on cloud and
+    the DB can't be reached.
+
+    The Looker Postgres lives at a 10.x private IP inside Juno's VPC. Jo's
+    laptop reaches it via VPN. Streamlit Cloud cannot — those servers are
+    on AWS US-East and have no path into Juno's network. Rather than
+    surfacing a 30-second psycopg2 timeout, raise a clear error pointing
+    Jo (and her TLs) at the local-app workflow.
+    """
+    import psycopg2
+    from compat import running_on_cloud
+    try:
+        return psycopg2.connect(db_url, connect_timeout=10)
+    except psycopg2.OperationalError as e:
+        if running_on_cloud():
+            raise CloudDBUnreachableError(
+                "Can't reach the Looker database from Streamlit Cloud — "
+                "it's on Juno's private network and only Jo's laptop "
+                "(on VPN) can connect.\n\n"
+                "👉 Ask Jo to click **🔄 Pull actuals** on her local rota "
+                "app (http://localhost:8501 → Reward Time). The fresh "
+                "numbers and skip counts will appear here within a few "
+                "seconds — the apps share the same state via Drive."
+            ) from e
+        raise
+
+
 def _lookup_targets(role):
     """Look up (base, stretch, metric) for a role string.
     Handles compound roles like 'Inbound phones + Webchat'."""
@@ -258,7 +295,7 @@ def pull_day_data(target_date):
     from compat import get_postgres_url
     db_url = get_postgres_url()
 
-    conn = psycopg2.connect(db_url)
+    conn = _connect_postgres(db_url)
     cur = conn.cursor()
     pdt = _find_pdt_table(cur)
 
@@ -334,7 +371,7 @@ def pull_skips(friday):
     start = min(dates)
     end = max(dates) + timedelta(days=1)
 
-    conn = psycopg2.connect(db_url)
+    conn = _connect_postgres(db_url)
     cur = conn.cursor()
     pdt = _find_pdt_table(cur)
 
