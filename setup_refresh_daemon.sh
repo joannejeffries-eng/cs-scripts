@@ -4,10 +4,11 @@
 # Three agents get installed:
 #   1. com.juno.cs-refresh-daemon       — pulls Looker actuals on demand (Slack-triggered)
 #   2. com.juno.cs-role-change-daemon   — captures TL-posted role moves (Slack-triggered)
-#   3. com.juno.cs-daily-actuals        — daily 06:00 weekday auto-pull (calendar-triggered)
+#   3. com.juno.cs-daily-actuals        — weekday auto-pull at 4 points per day
 #
 # Long-running daemons (1, 2) auto-start at every login and restart on crash.
-# The daily pull (3) fires Mon–Fri at 06:00 (catches up on wake if missed).
+# The auto-pull (3) fires Mon–Fri at 06:00, 11:00, 13:30 and 15:30
+# (catches up on wake if missed).
 #
 # What this does:
 #   - Writes your $STAFF_APP_LOOKER_POSTGRES_URL to a file the daemons
@@ -82,8 +83,9 @@ echo "Test them:"
 echo "  • Refresh:       post '🔄 refresh' in #dry-run-testing-jo"
 echo "  • Role change:   post 'Maisha → triage' in #client-support-leads"
 echo "                   (under today's anchor message — daemon posts it on first weekday poll)"
-echo "  • Daily auto:    launchctl kickstart -k gui/\$(id -u)/com.juno.cs-daily-actuals"
-echo "                   (forces an immediate run; otherwise fires Mon–Fri 06:00)"
+echo "  • Auto-pull:     launchctl kickstart -k gui/\$(id -u)/com.juno.cs-daily-actuals"
+echo "                   (forces an immediate run; otherwise fires Mon–Fri at"
+echo "                   06:00, 11:00, 13:30 and 15:30)"
 echo ""
 echo "Logs:"
 echo "  tail -f ~/.claude/scheduled-tasks/refresh-daemon/daemon.log"
