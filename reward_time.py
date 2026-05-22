@@ -628,6 +628,35 @@ def build_week(friday, assignments_fri=None, assignments_mon_thu=None,
     return week_data
 
 
+def _role_category(role):
+    """Reduce a role string to its primary category, for matching during rota sync.
+
+    Used to recognise that splits the user has set up are still compatible
+    with a new rota role string — e.g. a 'Triage only' segment should
+    survive the rota changing to 'Triage and Video Calls', because both are
+    the same underlying role category.
+
+    Examples:
+      'Triage only'                  → 'Triage'
+      'Triage and Video Calls'       → 'Triage'
+      'Triage + lender chasing'      → 'Triage'
+      'Inbound phones'               → 'Inbound phones'
+      'Inbound phones + Email Health'→ 'Inbound phones'
+      'Case setup only'              → 'Case setup'
+      'Lender chasing'               → 'Lender chasing'
+      'Reward time (prev week)'      → 'Reward time'
+    """
+    s = (role or '').strip()
+    if '(' in s:
+        s = s.split('(', 1)[0].strip()
+    # Order matters: ' + ' first (keeps "Inbound phones" head), then
+    # narrower separators that should strip suffixes.
+    for sep in (' + ', ' and ', ', ', ' only'):
+        if sep in s:
+            s = s.split(sep, 1)[0].strip()
+    return s
+
+
 def sync_rota_into_week(week_data, friday, assignments_fri=None, assignments_mon_thu=None):
     """Overlay the current rota onto an existing week without losing TL inputs.
 
@@ -703,13 +732,14 @@ def sync_rota_into_week(week_data, friday, assignments_fri=None, assignments_mon
                 expected_days += 1
 
                 # Does the existing split still match the new rota role?
-                # We check base roles (e.g. "Inbound phones" vs
-                # "Inbound phones + Email Health" — both base "Inbound phones").
-                new_base = new_role.split(' + ')[0]
+                # We compare role categories (e.g. 'Triage only',
+                # 'Triage and Video Calls' and 'Triage + lender chasing'
+                # all collapse to 'Triage').
+                new_cat = _role_category(new_role)
                 keep_splits = False
                 if dr.segments:
                     for seg in dr.segments:
-                        if seg.role.split(' + ')[0] == new_base:
+                        if _role_category(seg.role) == new_cat:
                             keep_splits = True
                             break
 
