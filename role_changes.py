@@ -1,7 +1,7 @@
 """
 Mid-day role-change capture.
 
-When a TL types `Maisha → triage` in #client-support-leads (threaded
+When a TL types `Maisha to triage` in #client-support-leads (threaded
 under the daily anchor), the role_change_daemon captures it as a
 structured move record. This module holds:
 
@@ -19,7 +19,7 @@ Move record shape:
         'end_time':    '12:00',             # null if still open
         'noted_by':    'U07Q2EEN3SL',       # slack user_id of the TL
         'noted_at':    '2026-05-26T10:32:15',
-        'raw_text':    'Maisha → triage 10:30-12',
+        'raw_text':    'Maisha to triage 10:30-12',
         'message_ts':  '1779984735.024381',
     }
 """
