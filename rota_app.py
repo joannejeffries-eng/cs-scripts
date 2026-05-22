@@ -1574,6 +1574,8 @@ elif page == "🏆 Reward Time":
                         f"{', '.join(d.strftime('%a %d/%m') for d in targets)}"
                     )
                     st.rerun()
+                except rt.CloudDBUnreachableError as e:
+                    st.warning(str(e))
                 except Exception as e:
                     st.error(f"Pull failed: {e}")
 

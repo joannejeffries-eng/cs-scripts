@@ -350,6 +350,8 @@ def _pull_current_figures(reward_friday: date, reward_dates: list[date]) -> None
             f"Pulled current figures + skips for {len(targets)} day(s): "
             f"{', '.join(d.strftime('%a %d/%m') for d in targets)}"
         )
+    except rt.CloudDBUnreachableError as e:
+        st.warning(str(e))
     except Exception as e:
         st.error(f"Pull failed: {e}")
 
