@@ -13,7 +13,9 @@ env/
 .idea/
 *.swp
 
-# Local Streamlit state (per-machine cache; not part of source)
+# Local Streamlit state (per-machine cache; not part of source).
+# Real secrets live in the Streamlit Cloud UI; locally we read from
+# ~/.config/juno/claude-code/ files (see compat.py).
 .streamlit/secrets.toml
 
 # State files live under ~/.claude/scheduled-tasks/ — never inside the repo,
