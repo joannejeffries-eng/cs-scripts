@@ -923,6 +923,7 @@ with st.sidebar:
 
     page = st.radio("Navigation", [
         "🗓️ Weekly Rota",
+        "📡 Live Rota",
         "📊 Dashboard",
         "💬 Morning Message",
         "🍽️ Lunch Rota",
@@ -1060,6 +1061,65 @@ if page == "🗓️ Weekly Rota":
                 assignments[abs_name][di] = abs_type
                 st.session_state[f"assignments_{week_key}"] = assignments
                 st.rerun()
+
+
+elif page == "📡 Live Rota":
+    import role_changes as _rc
+    st.header("📡 Live Rota")
+    st.caption(
+        "Roles as actually happening — overlays mid-day moves captured "
+        "from #client-support-leads on top of the planned rota. "
+        "TLs post `Maisha → triage` etc. in today's anchor thread."
+    )
+
+    picked_day = st.date_input(
+        "Day", value=date.today(),
+        help="Pick any working day. Defaults to today.",
+        key="live_rota_day",
+    )
+
+    # Need the rota assignments for this day's week
+    picked_monday = picked_day - timedelta(days=picked_day.weekday())
+    week_key_live = picked_monday.isoformat()
+    live_assignments = None
+    if f"assignments_{week_key_live}" in st.session_state:
+        live_assignments = st.session_state[f"assignments_{week_key_live}"]
+    else:
+        try:
+            gc = _cached_gspread()
+            live_assignments, _ = read_original_rota(gc, picked_monday)
+            st.session_state[f"assignments_{week_key_live}"] = live_assignments
+        except Exception as e:
+            st.error(f"Couldn't fetch rota for w/c {picked_monday.strftime('%d %b')}: {e}")
+            st.stop()
+
+    moves = _rc.load_moves(picked_day)
+
+    df = _rc.build_live_rota_df(picked_day, live_assignments, moves)
+    if df.empty:
+        st.info("No working roles on this day.")
+    else:
+        st.dataframe(
+            df.style.map(role_style),
+            use_container_width=True,
+            height=min(60 + 35 * len(df), 700),
+        )
+
+    if moves:
+        st.subheader(f"Today's moves ({len(moves)})")
+        for m in moves:
+            from_role = m.get('from_role') or '?'
+            to_role = m.get('to_role') or '?'
+            start = m.get('start_time') or '?'
+            end = m.get('end_time') or 'open'
+            noted_by = m.get('noted_by', '')
+            who = f"<@{noted_by}>" if noted_by else ''
+            st.caption(
+                f"• **{m.get('name')}**: {from_role} → {to_role}  "
+                f"{start} – {end}  _logged by {who}_"
+            )
+    else:
+        st.caption("No moves captured for this day yet.")
 
 
 elif page == "📊 Dashboard":
@@ -1511,7 +1571,7 @@ elif page == "🏆 Reward Time":
     st.caption(f"Reward week: **{reward_friday.strftime('%d %b')} (Fri)** → **{reward_end.strftime('%d %b')} (Thu)**")
 
     # Week picker
-    col_pick1, col_pick2, col_pick3, col_pick4 = st.columns([2, 1, 1, 1])
+    col_pick1, col_pick2, col_pick3, col_pick4, col_pick5 = st.columns([2, 1, 1, 1, 1])
     with col_pick1:
         pick_date = st.date_input(
             "View reward week containing",
@@ -1541,6 +1601,14 @@ elif page == "🏆 Reward Time":
             "🍯 Autofill from notes",
             use_container_width=True,
             help="Reads Daily Notes and splits days with a 'Reward time' or 'appointment' note into role + segment.",
+        )
+    with col_pick5:
+        st.write("")
+        apply_moves_clicked = st.button(
+            "🧩 Apply moves",
+            use_container_width=True,
+            help="Apply captured mid-day role moves from #client-support-leads — "
+                 "splits each day automatically using moves ≥ 30 min.",
         )
 
     # Load or initialise week data
@@ -1688,6 +1756,64 @@ elif page == "🏆 Reward Time":
                     st.rerun()
             except Exception as e:
                 st.error(f"Autofill failed: {e}")
+
+    if apply_moves_clicked:
+        import role_changes as _rc
+        with st.spinner("Reading captured moves and applying splits…"):
+            try:
+                applied_summary = []
+                skipped_summary = []
+                noise_skipped = 0
+                for d in reward_dates:
+                    moves = _rc.load_moves(d)
+                    if not moves:
+                        continue
+                    # Pre-count moves below noise floor for summary
+                    for m in moves:
+                        if m.get('action') in (None, 'move'):
+                            try:
+                                sh, sm = (int(p) for p in m.get('start_time', '0:0').split(':'))
+                                eh, em = (int(p) for p in m.get('end_time', '0:0').split(':'))
+                                dur = (eh * 60 + em) - (sh * 60 + sm)
+                                if 0 < dur < 30:
+                                    noise_skipped += 1
+                            except Exception:
+                                pass
+                    # Run per person who has a move on this day
+                    names_with_moves = sorted({m.get('name') for m in moves if m.get('name')})
+                    for name in names_with_moves:
+                        pw = week_data.get(name)
+                        if not pw:
+                            continue
+                        result = rt.apply_moves_to_day(pw, d, moves)
+                        label = f"{name} {d.strftime('%a %d/%m')}"
+                        if result['applied']:
+                            segs = ', '.join(f"{r} {h:.1f}h" for r, h in result['segments'])
+                            applied_summary.append((label, segs))
+                        else:
+                            skipped_summary.append((label, result['reason']))
+                if applied_summary:
+                    save_week(reward_friday, week_data)
+                    st.session_state[rw_key] = week_data
+                    st.success(f"Applied {len(applied_summary)} split(s) from captured moves.")
+                    with st.expander(f"✏️ {len(applied_summary)} day(s) split"):
+                        for lbl, segs in applied_summary:
+                            st.caption(f"  • {lbl}: {segs}")
+                else:
+                    st.info("No moves to apply (no qualifying moves found or all days already split).")
+                if skipped_summary or noise_skipped:
+                    parts = []
+                    if skipped_summary:
+                        parts.append(f"{len(skipped_summary)} day-person(s) skipped")
+                    if noise_skipped:
+                        parts.append(f"{noise_skipped} move(s) below 30-min noise floor")
+                    with st.expander("⏭️ " + ' · '.join(parts)):
+                        for lbl, reason in skipped_summary:
+                            st.caption(f"  • {lbl}: {reason}")
+                if applied_summary:
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Apply moves failed: {e}")
 
     # ── Throughput grid ──
     st.subheader("Throughput vs Targets")

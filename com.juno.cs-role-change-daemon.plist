@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.juno.cs-role-change-daemon</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/joannejeffries/.pyenv/shims/python3</string>
+    <string>/Users/joannejeffries/Documents/GitHub/cs-scripts/role_change_daemon.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/joannejeffries/Documents/GitHub/cs-scripts</string>
+
+  <!-- Auto-start at login and restart on crash -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/joannejeffries/.claude/scheduled-tasks/role-changes/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/joannejeffries/.claude/scheduled-tasks/role-changes/launchd.err.log</string>
+</dict>
+</plist>

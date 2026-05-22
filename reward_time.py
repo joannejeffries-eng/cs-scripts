@@ -1207,6 +1207,95 @@ SPLITTABLE_ROLES = [
 ]
 
 
+def apply_moves_to_day(pw, target_date, moves, *, noise_floor_min=30):
+    """Apply captured role-change moves to a person's day as split segments.
+
+    Reads the day's `pw.days[target_date]` and the captured `moves` list
+    (typically from role_changes.load_moves(target_date)). For each move
+    on this person ≥ `noise_floor_min`:
+        - Aggregates total time on each moved-to role
+        - Builds segments_spec covering: remaining time on the rota role
+          + total time on each moved role
+        - Calls existing split_day() to apply
+
+    Skips:
+      - days that already have segments (don't clobber TL manual splits)
+      - days that aren't working (absences)
+      - moves with no start/end times (open moves)
+      - moves shorter than noise_floor_min
+
+    Returns {'applied': bool, 'reason': str, 'segments': [(role, hours), …]}.
+    """
+    dr = pw.days.get(target_date)
+    if not dr or not dr.is_working:
+        return {'applied': False, 'reason': 'not working', 'segments': []}
+    if dr.segments:
+        return {'applied': False, 'reason': 'already split', 'segments': []}
+
+    person_moves = []
+    for m in moves:
+        if m.get('name') != pw.name:
+            continue
+        if m.get('action') not in (None, 'move'):
+            continue
+        start = m.get('start_time') or ''
+        end = m.get('end_time') or ''
+        if ':' not in start or ':' not in end:
+            continue
+        try:
+            sh, sm = (int(p) for p in start.split(':'))
+            eh, em = (int(p) for p in end.split(':'))
+        except ValueError:
+            continue
+        dur_min = (eh * 60 + em) - (sh * 60 + sm)
+        if dur_min < noise_floor_min:
+            continue
+        person_moves.append({
+            'to_role': m.get('to_role'),
+            'duration_min': dur_min,
+        })
+
+    if not person_moves:
+        return {'applied': False, 'reason': 'no qualifying moves',
+                'segments': []}
+
+    # Aggregate hours by destination role (multiple short moves to same role merge)
+    by_role = {}
+    for m in person_moves:
+        r = m['to_role']
+        by_role[r] = by_role.get(r, 0.0) + (m['duration_min'] / 60.0)
+
+    moved_hours = sum(by_role.values())
+    rota_hours = max(0.0, dr.shift_hours - moved_hours)
+    rota_role = dr.role
+
+    if rota_hours < 0.5:
+        return {
+            'applied': False,
+            'reason': f'whole-day move ({rota_role} → {list(by_role)[0]}) — '
+                       f'consider updating the rota instead',
+            'segments': [],
+        }
+
+    segments_spec = [(rota_role, round(rota_hours, 2))]
+    for role, hrs in by_role.items():
+        segments_spec.append((role, round(hrs, 2)))
+
+    ok = split_day(pw, target_date, segments_spec)
+    if not ok:
+        return {'applied': False, 'reason': 'split_day rejected the spec',
+                'segments': []}
+
+    add_override(
+        pw, f'apply_moves ({target_date.strftime("%a %d/%m")})',
+        rota_role, dr.role,
+        'Auto-split from role-change moves: '
+        + ', '.join(f"{r} {h:.1f}h" for r, h in segments_spec),
+    )
+    return {'applied': True, 'reason': 'split applied',
+            'segments': segments_spec}
+
+
 # ── Eligibility calculation ─────────────────────────────────────────────────
 
 def calculate_eligibility(pw):
