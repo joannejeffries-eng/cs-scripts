@@ -1787,3 +1787,70 @@ def write_week_summary(friday, week_data):
     # Re-format header
     ws.format('A1:I1', {'textFormat': {'bold': True}, 'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}})
     print(f"  Wrote week summary for {week_label} ({len(rows)} people)")
+
+
+def write_daily_actuals_snapshot(friday, week_data):
+    """Write/update a flat snapshot table on the 'Daily Actuals Snapshot' tab.
+
+    One row per person showing the current reward week's actuals + skips
+    + total hours worked. Rewritten in full each call so the timestamp
+    in cell A2 always reflects the latest refresh.
+
+    Layout:
+        A: Last refreshed (only filled on row 2)
+        B: Name
+        C: Skips
+        D-H: Fri / Mon / Tue / Wed / Thu actual (against rota'd metric)
+        I: Hours worked this week
+
+    Designed for the daily-auto-pull cron — gives Jo a glance-able view
+    of fresh numbers without opening the rota app."""
+    from datetime import datetime as _dt
+
+    ss = _get_reward_sheet()
+    title = 'Daily Actuals Snapshot'
+    try:
+        ws = ss.worksheet(title)
+    except Exception:
+        ws = ss.add_worksheet(title, rows=30, cols=10)
+
+    week_dates = get_weekday_dates(friday)  # [Fri, Mon, Tue, Wed, Thu]
+    refreshed_at = _dt.now().strftime('%a %d %b %Y %H:%M')
+
+    header = ['Last refreshed', 'Name', 'Skips',
+              'Fri actual', 'Mon actual', 'Tue actual', 'Wed actual', 'Thu actual',
+              'Hours worked']
+
+    rows = [header]
+    first_data_row = True
+    for name in ALL_AGENTS:
+        pw = week_data.get(name)
+        if not pw or pw.days_worked == 0:
+            continue
+        row = [refreshed_at if first_data_row else '']
+        first_data_row = False
+        row.append(name)
+        row.append(pw.skips)
+        for d in week_dates:
+            dr = pw.days.get(d)
+            if not dr or not dr.is_working:
+                row.append('—')
+            elif dr.segments:
+                row.append(' | '.join(str(s.actual) for s in dr.segments))
+            else:
+                row.append(dr.actual)
+        # Total hours actually worked (includes training, per Jo's rule)
+        hours = sum(
+            dr.shift_hours for dr in pw.days.values()
+            if dr.is_working or dr.role == 'Training'
+        )
+        row.append(f"{hours:.1f}")
+        rows.append(row)
+
+    ws.clear()
+    ws.update(f'A1:I{len(rows)}', rows, value_input_option='USER_ENTERED')
+    ws.format('A1:I1', {
+        'textFormat': {'bold': True},
+        'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9},
+    })
+    print(f"  Wrote daily actuals snapshot ({len(rows) - 1} people)")
