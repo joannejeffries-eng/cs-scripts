@@ -242,6 +242,200 @@ def get_creds():
     return get_google_credentials()
 
 
+def read_working_hours(gc):
+    """Read the 'Working Hours' tab from the rota sheet and return
+    {first_name: (start_hour, end_hour)} as fractional 24-hour values.
+
+    Parses the human-readable 'Schedule' column with two simple rules:
+      - START = first time mentioned in the first range
+      - END   = last time mentioned in the last range, PM-shifted if it
+                ends up < START in 24h
+
+    Handles common formats: '8-5', '9-5:30', '9-6', '8-2', 'Off Mon, 8-5
+    Tue-Fri', '9-5:30 or 8:30-5', '7-8:30, 9:15-3, 3:45-4:30 (split)'.
+
+    Returns an empty dict if the Working Hours tab can't be read."""
+    import re
+
+    def _parse_t(s):
+        s = s.strip().lower().replace(' ', '')
+        is_pm = is_am = False
+        if s.endswith('pm'):
+            is_pm = True; s = s[:-2]
+        elif s.endswith('am'):
+            is_am = True; s = s[:-2]
+        s = s.replace('.', ':')
+        try:
+            if ':' in s:
+                h, m = s.split(':', 1)
+                v = int(h) + int(m) / 60
+            else:
+                v = float(s)
+        except ValueError:
+            return None
+        if is_pm and v < 12:
+            v += 12
+        elif is_am and v == 12:
+            v = 0
+        return v
+
+    range_re = re.compile(
+        r'(\d{1,2}(?::\d{2})?(?:\.\d+)?(?:\s*[ap]m)?)'
+        r'\s*[-–]\s*'
+        r'(\d{1,2}(?::\d{2})?(?:\.\d+)?(?:\s*[ap]m)?)',
+        re.IGNORECASE,
+    )
+
+    try:
+        ss = open_sheet(gc, EXISTING_ROTA_ID)
+        ws = ss.worksheet("Working Hours")
+        rows = ws.get_all_values()
+    except Exception:
+        return {}
+
+    if not rows:
+        return {}
+
+    # Header is row 0: ['Agent', 'Mon Hrs', ..., 'Weekly Total', 'Schedule']
+    header = [h.strip() for h in rows[0]]
+    try:
+        name_col = header.index('Agent')
+        sched_col = header.index('Schedule')
+    except ValueError:
+        return {}
+
+    result = {}
+    for r in rows[1:]:
+        if len(r) <= sched_col:
+            continue
+        name = r[name_col].strip()
+        sched = r[sched_col].strip()
+        if not name:
+            continue
+        matches = range_re.findall(sched)
+        if not matches:
+            continue
+        start = _parse_t(matches[0][0])
+        end = _parse_t(matches[-1][1])
+        if start is None or end is None:
+            continue
+        if end < start:
+            end += 12
+        result[name] = (start, end)
+    return result
+
+
+def update_daily_notes_roles(gc, monday, assignments):
+    """Update the **Scheduled role** and **Cover Needed?** columns of any
+    existing Daily Notes rows whose date falls in the week of `monday`,
+    based on the latest rota assignments.
+
+    Does NOT add or delete rows. Does NOT touch Time, Note, or Who's
+    covering — those are TL- or Jo-authored fields.
+
+    Cover Needed rule: `Yes` for Inbound phones or Triage + lender
+    chasing roles; `No` otherwise (per Jo's Daily Notes convention).
+
+    Returns: dict {'updated': N, 'unchanged': M, 'skipped': K, 'detail': [...]}
+    """
+    from datetime import timedelta as _td
+    ss = open_sheet(gc, EXISTING_ROTA_ID)
+    ws = ss.worksheet("Daily Notes")
+    rows = ws.get_all_values()
+
+    # Daily Notes schema (matches read_daily_notes): data starts at row 5
+    # (header is row 4, 1-indexed = row 3 0-indexed). Columns:
+    # 0=Date  1=Time  2=Name  3=Role  4=Note  5=Cover Needed?  6=Who's covering?
+
+    week_dates = {monday + _td(days=i): i for i in range(5)}
+
+    cells = []
+    detail = []
+    updated = unchanged = skipped = 0
+
+    for i, row in enumerate(rows):
+        if i < 4:   # skip header rows
+            continue
+        if len(row) < 6:
+            continue
+        date_str = (row[0] or '').strip()
+        name = (row[2] or '').strip()
+        if not date_str or not name:
+            continue
+        d = _parse_uk_date(date_str)
+        if d is None or d not in week_dates:
+            continue
+        di = week_dates[d]
+        actual_role = assignments.get(name, {}).get(di, '')
+        if not actual_role:
+            skipped += 1
+            continue
+
+        cover_yes = (actual_role.startswith('Inbound phones')
+                      or actual_role == 'Triage + lender chasing')
+        cover_str = 'Yes' if cover_yes else 'No'
+
+        cur_role = (row[3] or '').strip()
+        cur_cover = (row[5] or '').strip()
+
+        # ONLY touch a row when the role actually changed. If the role is
+        # already correct but the cover differs from the role-based
+        # default, leave it — that's a deliberate TL override (e.g.
+        # Sophie's all-day video-call days have cover=Yes despite the
+        # Triage-only role, because she's not on triage that day).
+        if cur_role == actual_role:
+            unchanged += 1
+            continue
+
+        from gspread.cell import Cell
+        cells.append(Cell(row=i + 1, col=4, value=actual_role))   # col D = Role
+        cells.append(Cell(row=i + 1, col=6, value=cover_str))     # col F = Cover Needed?
+        updated += 1
+        detail.append(f"{name} {d.strftime('%a %d/%m')}: "
+                       f"{cur_role!r} → {actual_role!r} "
+                       f"(cover {cur_cover or '∅'} → {cover_str})")
+
+    if cells:
+        ws.update_cells(cells, value_input_option='USER_ENTERED')
+
+    return {'updated': updated, 'unchanged': unchanged,
+             'skipped': skipped, 'detail': detail}
+
+
+def append_daily_notes_rows(gc, rows):
+    """Append the given rows to the Daily Notes tab of the rota sheet.
+
+    Each row is a dict with keys: date (datetime.date), time, name, role,
+    note, cover_needed (bool), whos_covering.
+
+    The Daily Notes sheet has 7 columns:
+        Date | Time | Name | Scheduled role for the day | Note | Cover Needed? | Who's covering?
+
+    Date is written as dd/mm/yyyy. cover_needed becomes 'Yes' / 'No'.
+
+    Returns the number of rows appended."""
+    if not rows:
+        return 0
+    ss = open_sheet(gc, EXISTING_ROTA_ID)
+    ws = ss.worksheet("Daily Notes")
+    values = []
+    for r in rows:
+        d = r.get('date')
+        date_str = d.strftime('%d/%m/%Y') if d else ''
+        cover = 'Yes' if r.get('cover_needed') else 'No'
+        values.append([
+            date_str,
+            r.get('time', ''),
+            r.get('name', ''),
+            r.get('role', ''),
+            r.get('note', ''),
+            cover,
+            r.get('whos_covering', ''),
+        ])
+    ws.append_rows(values, value_input_option='USER_ENTERED')
+    return len(values)
+
+
 def get_gspread():
     import gspread
     return gspread.authorize(get_creds())

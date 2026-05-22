@@ -262,8 +262,21 @@ def get_weekday_dates(friday):
 
 # ── Database queries ────────────────────────────────────────────────────────
 
+# Cache the PDT table lookup per Python process. The freshness scan over
+# 4+ candidate tables (full MAX(date)) was costing ~9 s per pull_day_data
+# call — multiply by 5 days and a full-week refresh was 45 s of overhead
+# before any real querying.
+_PDT_TABLE_CACHE = {'name': None}
+
+
 def _find_pdt_table(cur):
-    """Find the freshest pdt_things_done_by_person table in looker_scratch."""
+    """Find the freshest pdt_things_done_by_person table in looker_scratch.
+
+    Cached for the lifetime of the Python process; restart the Streamlit
+    app if Looker rebuilds its scratch tables (uncommon)."""
+    if _PDT_TABLE_CACHE['name'] is not None:
+        return _PDT_TABLE_CACHE['name']
+
     cur.execute("""
         SELECT table_schema || '.' || table_name
         FROM information_schema.tables
@@ -284,6 +297,7 @@ def _find_pdt_table(cur):
 
     if not best_table:
         raise RuntimeError("All pdt_things_done_by_person tables are empty")
+    _PDT_TABLE_CACHE['name'] = best_table
     return best_table
 
 
@@ -1211,8 +1225,10 @@ def calculate_eligibility(pw):
     if not working_days:
         return False, '', 0, 'No working days'
 
-    # Check skip threshold (pro-rata)
-    pro_rata_factor = pw.days_worked / 5.0 if pw.days_worked > 0 else 1.0
+    # Check skip threshold (pro-rata by qualifying days — training counts
+    # as a full day per Jo's rule)
+    qd = _qualifying_days(pw)
+    pro_rata_factor = qd / 5.0 if qd > 0 else 1.0
     skip_limit = SKIP_THRESHOLD_WEEKLY * pro_rata_factor
     if pw.skips > skip_limit:
         return False, '', 0, f'Skips {pw.skips} > limit {skip_limit:.0f}'
@@ -1246,11 +1262,33 @@ def calculate_eligibility(pw):
     return True, 'base', hrs, 'Hit base every day'
 
 
+def _qualifying_days(pw):
+    """Days that count toward reward-time pro-rata.
+
+    Per Jo's rule: pro-rate only for sickness / absence — training days
+    count as full days. So a person who worked 4 days and trained 1 day
+    is treated as a full 5-day week for both reward hours and the skip
+    threshold."""
+    return sum(
+        1 for dr in pw.days.values()
+        if dr.is_working or dr.role == 'Training'
+    )
+
+
 def _actual_hours_worked(pw):
-    """Sum shift_hours for days actually worked (excludes NWD, bank hols, AL, sick)."""
+    """Hours that count toward the reward-time pro-rata numerator.
+
+    Includes:
+      - Days where dr.is_working (productive work hours)
+      - Days where dr.role == 'Training' (training counts as a full day)
+
+    Excludes:
+      - Annual leave / unplanned absence (legitimately reduce pro-rata)
+      - Non-working days / bank holidays (not part of the contract that week)
+    """
     total = 0.0
     for d, dr in pw.days.items():
-        if dr.is_working:
+        if dr.is_working or dr.role == 'Training':
             total += dr.shift_hours
     return total
 
@@ -1336,6 +1374,138 @@ def build_reward_slack_message(friday, week_data):
 
     lines.append("Please let your team members know and confirm their reward day slots.")
     return "\n".join(lines)
+
+
+def build_reward_message_by_team(friday, week_data):
+    """One consolidated Slack message for #reward-time-questions-cs.
+
+    Grouped by TL's team. For each team:
+      ⭐/✅ Name — Stretch/Base — Xh Ym — Day AM/PM   (qualifiers)
+      _Didn't qualify: Name, Name_                    (italic, names only — no reasons)
+
+    Reasons are deliberately omitted — Jo doesn't want sensitive reasons
+    (skips over limit, missed base, etc.) broadcast to the team channel.
+    Anyone curious can ping Jo."""
+    week_label = friday.strftime('%d %b %Y')
+    lines = [f"🎉 *Reward Time — week of {week_label}*", '']
+
+    tl_order = ['Jess', 'Yasmin', 'Courtney']
+
+    for tl in tl_order:
+        members = TL_TEAMS.get(tl, [])
+        qualified_lines = []
+        misses = []
+        for name in members:
+            pw = week_data.get(name)
+            if not pw or pw.days_worked == 0:
+                continue
+            eligible, level, hours, _ = calculate_eligibility(pw)
+            if not eligible:
+                misses.append(name)
+                continue
+            rd = REWARD_DAYS.get(name)
+            slot = f"{rd[0]} {rd[1]}" if rd else "TBC"
+            badge = '⭐' if level == 'stretch' else '✅'
+            level_word = 'Stretch' if level == 'stretch' else 'Base'
+            qualified_lines.append(
+                f"{badge} *{name}* — {level_word} — {format_reward_hours(hours)} — {slot}"
+            )
+
+        if qualified_lines or misses:
+            lines.append(f"*{tl}'s team*")
+            if qualified_lines:
+                lines.extend(qualified_lines)
+            if misses:
+                lines.append(f"_Didn't qualify: {', '.join(misses)}_")
+            lines.append('')
+
+    return '\n'.join(lines).rstrip() + '\n'
+
+
+def build_daily_notes_draft(friday, week_data, next_week_monday,
+                              shifts_by_name=None):
+    """Build a list of draft Daily Notes rows for each qualifying person's
+    reward block, taken in the rota week starting `next_week_monday`.
+
+    Each row is a dict matching the Daily Notes sheet columns:
+        date, time, name, role, note, cover_needed, whos_covering
+
+    Time strings come from each person's shift bounds + reward hours:
+        PM block: '(shift_end - hours):MM - shift_end:MM'
+        AM block: 'shift_start:MM - (shift_start + hours):MM'
+
+    `shifts_by_name` (optional): {name: (start_h, end_h)} read from the
+    rota sheet's Working Hours tab via generate_rota.read_working_hours.
+    Falls back to generate_rota.DEFAULT_SHIFTS for anyone not present.
+
+    Cover-needed and Role are filled in by the caller from the next
+    week's rota assignments."""
+    from datetime import timedelta as _td
+
+    # Map Tue/Wed/Thu → day_idx (Mon=0 .. Sun=6)
+    day_idx_by_name = {'Mon': 0, 'Tue': 1, 'Wed': 2, 'Thu': 3, 'Fri': 4}
+
+    # Lazy import to avoid circular dep at module load
+    try:
+        from generate_rota import DEFAULT_SHIFTS as _DEFAULT_SHIFTS
+    except Exception:
+        _DEFAULT_SHIFTS = {}
+
+    shifts_by_name = shifts_by_name or {}
+
+    rows = []
+    for name in ALL_AGENTS:
+        pw = week_data.get(name)
+        if not pw or pw.days_worked == 0:
+            continue
+        eligible, level, hours, _ = calculate_eligibility(pw)
+        if not eligible:
+            continue
+        rd = REWARD_DAYS.get(name)
+        if not rd:
+            continue
+        day_name, block = rd
+        day_idx = day_idx_by_name.get(day_name)
+        if day_idx is None:
+            continue
+        target_date = next_week_monday + _td(days=day_idx)
+
+        # Look up shift: prefer Working Hours sheet, fall back to DEFAULT_SHIFTS
+        shift = shifts_by_name.get(name) or _DEFAULT_SHIFTS.get(name, (9, 17))
+        shift_start, shift_end = shift
+
+        if block == 'PM':
+            start_h = shift_end - hours
+            end_h = shift_end
+        else:   # AM
+            start_h = shift_start
+            end_h = shift_start + hours
+
+        time_str = _fmt_hour(start_h) + ' - ' + _fmt_hour(end_h)
+
+        rows.append({
+            'date': target_date,
+            'time': time_str,
+            'name': name,
+            'role': '',   # filled in by caller using the new week's rota
+            'note': f"Reward time ({level} — {format_reward_hours(hours)})",
+            'cover_needed': False,   # set by caller based on role
+            'whos_covering': '',
+        })
+    return rows
+
+
+def _fmt_hour(h: float) -> str:
+    """Format a fractional hour (e.g. 13.5) as 'HH:MM' or short form.
+
+    Match the look of existing Daily Notes entries: full hours just show
+    as the hour (e.g. '5' not '5:00'); fractional shows minutes.
+    """
+    whole = int(h)
+    mins = int(round((h - whole) * 60))
+    if mins == 0:
+        return str(whole)
+    return f"{whole}:{mins:02d}"
 
 
 def build_tl_messages(friday, week_data):

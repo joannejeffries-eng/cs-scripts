@@ -99,7 +99,8 @@ from generate_rota import (
     base_role, build_people, generate_lunch_rota,
     suggest_cover, build_dashboard_data,
     get_gspread,
-    read_original_rota, read_daily_notes,
+    read_original_rota, read_daily_notes, append_daily_notes_rows,
+    read_working_hours, update_daily_notes_roles,
     DEFAULT_ROLE_TARGETS,
     DEFAULT_SKILLS, DEFAULT_SHIFTS,
 )
@@ -108,7 +109,8 @@ from reward_time import (
     get_reward_friday, get_weekday_dates, load_week, save_week,
     build_week, update_day_actuals, pull_day_data, calculate_eligibility, add_override,
     format_reward_hours,
-    build_reward_slack_message, build_tl_messages,
+    build_reward_slack_message, build_tl_messages, build_reward_message_by_team,
+    build_daily_notes_draft,
     write_audit_entry, write_week_summary,
     adjust_shift_hours, split_day, unsplit_day,
     REWARD_DAYS, ALL_AGENTS as RT_AGENTS, TL_TEAMS, ROLE_TARGETS as RT_TARGETS,
@@ -154,6 +156,16 @@ def _load_historic_rota():
     return records, names, dates
 
 
+@st.cache_data(ttl=600)
+def _cached_working_hours():
+    """Read & cache the Working Hours tab from the rota sheet for 10 min.
+    Returns {name: (start_h, end_h)} fractional 24-hour values."""
+    try:
+        return read_working_hours(_cached_gspread())
+    except Exception:
+        return {}
+
+
 CORE_PHONES = ['Becky', 'Elida', 'Fionn', 'Jade', 'Kate']
 WIDER_TEAM = ['Bella', 'Clare', 'Cris', 'Erika', 'Harriet',
               'Kirsty', 'Lizzie', 'Lucy', 'Maisha', 'Noemi', 'Sophie', 'Tara', 'Thea']
@@ -166,6 +178,8 @@ from compat import get_slack_token
 SLACK_TOKEN_PATH = Path.home() / '.config/juno/claude-code/slack-token'  # kept for backward refs
 SLACK_CHANNEL_MORNING_MSG = 'C0AUP24HQPP'      # #dry-run-testing-jo
 SLACK_CHANNEL_CS_MORNING = 'C02TP0FBM32'        # real CS channel — scheduled 07:30 post lands here
+SLACK_CHANNEL_REWARD_QUESTIONS = 'C0AS755PW49' # #reward-time-questions-cs (live target for the team-grouped reward post)
+JO_USER_ID = 'U07KFSSCUNT'                     # Jo Jeffries — Slack DM target for "Send test"
 
 # Subteam mention for @client-support-team. Looked up via Slack search 2026-05-20.
 CS_TEAM_SUBTEAM_ID = 'S02TFJF9PMW'
@@ -943,7 +957,20 @@ with st.sidebar:
         st.caption("🧪 Dry-run — previews go to your dry-run channel.")
 
     st.divider()
-    st.caption("Data source: [Rota Sheet](https://docs.google.com/spreadsheets/d/1CMSEZSb-4D4mO6iPb8tVSaAPsZT5KZst9VSXH4bpi0Y)")
+    st.caption("**Linked sheets**")
+    st.caption(
+        "📋 [Rota Sheet](https://docs.google.com/spreadsheets/d/1CMSEZSb-4D4mO6iPb8tVSaAPsZT5KZst9VSXH4bpi0Y)"
+    )
+    # Reward Time audit sheet — sheet ID loaded from saved state so the
+    # link auto-updates if it ever gets recreated.
+    try:
+        rt.load_reward_state()
+        if rt.REWARD_SHEET_ID:
+            st.caption(
+                f"📒 [Reward Time Audit](https://docs.google.com/spreadsheets/d/{rt.REWARD_SHEET_ID})"
+            )
+    except Exception:
+        pass
 
 # ── Load data ──
 people = load_config()
@@ -1982,8 +2009,7 @@ elif page == "🏆 Reward Time":
     total_count = sum(1 for name in RT_AGENTS if week_data.get(name) and week_data[name].days_worked > 0)
     st.metric("Qualified", f"{qualified_count} / {total_count}")
 
-    # Write week summary to Google Sheet when signing off
-    col_summary, col_send = st.columns(2)
+    col_summary, col_send_test, col_send_live = st.columns(3)
     with col_summary:
         if st.button("💾 Save week summary to sheet", use_container_width=True):
             try:
@@ -1992,20 +2018,169 @@ elif page == "🏆 Reward Time":
             except Exception as e:
                 st.error(f"Failed to write summary: {e}")
 
-    with col_send:
-        if st.button("📤 Send to #dry-run-testing-jo", type="primary", use_container_width=True):
+    with col_send_test:
+        if st.button("🧪 Send test (to my DM)", use_container_width=True,
+                      help="Posts the team-grouped reward message to your Slack DM "
+                           "so you can preview before sending live."):
             try:
                 write_week_summary(reward_friday, week_data)
-                msg = build_reward_slack_message(reward_friday, week_data)
-                send_slack_message(SLACK_CHANNEL_MORNING_MSG, msg)
-                st.success("Reward time summary sent to #dry-run-testing-jo")
+                msg = build_reward_message_by_team(reward_friday, week_data)
+                send_slack_message(JO_USER_ID, msg)
+                st.success("✅ Test sent to your DM")
             except Exception as e:
                 st.error(f"Failed: {e}")
 
-    # Preview message
+    with col_send_live:
+        if st.button("📤 Send to #reward-time-questions-cs",
+                      type='primary', use_container_width=True,
+                      help="LIVE post — visible to everyone in the channel."):
+            try:
+                write_week_summary(reward_friday, week_data)
+                msg = build_reward_message_by_team(reward_friday, week_data)
+                send_slack_message(SLACK_CHANNEL_REWARD_QUESTIONS, msg)
+                st.success("✅ Posted to #reward-time-questions-cs")
+            except Exception as e:
+                st.error(f"Failed: {e}")
+
+    # Preview message — DELIBERATELY no `key=` so Streamlit re-reads `value=`
+    # on every rerun (otherwise the textarea stays stuck on the first-render
+    # message even after Pull actuals refreshes the underlying data).
     with st.expander("Preview Slack message"):
         msg = build_reward_slack_message(reward_friday, week_data)
-        st.text_area("Message preview", value=msg, height=400, key="reward_msg_preview")
+        st.text_area(
+            "Message preview",
+            value=msg,
+            height=max(280, min(700, 24 + msg.count('\n') * 22)),
+        )
+
+    # ── Daily Notes draft ──
+    st.divider()
+    st.markdown("### 📝 Add reward time to Daily Notes")
+    st.caption(
+        "Reward time earned in this reward week is taken in the *next* rota "
+        "week (reward days are Tue/Wed/Thu). Edit the draft below and click "
+        "**Apply** to append the rows to the rota's Daily Notes tab."
+    )
+
+    # Reward earned this reward week (Fri–Thu) is TAKEN in the next reward
+    # week. Reward days are Tue/Wed/Thu, all of which sit in the rota week
+    # starting on the Monday 10 days after this reward week's Friday.
+    # e.g. reward_friday = Fri 15 May → reward taken in rota week starting
+    # Mon 25 May.
+    next_monday = reward_friday + timedelta(days=10)
+
+    # Build the draft. We need each person's role on their target_date — read
+    # the next rota week's assignments.
+    next_assignments = None
+    try:
+        gc = _cached_gspread()
+        next_assignments, _ = read_original_rota(gc, next_monday)
+    except Exception as e:
+        st.warning(f"Couldn't read the rota for w/c {next_monday.strftime('%d %b %Y')}: {e}")
+
+    # Look up each person's shift from the rota's Working Hours tab —
+    # gives us per-person start/end times for the reward block.
+    working_hours = _cached_working_hours()
+    draft = build_daily_notes_draft(
+        reward_friday, week_data, next_monday,
+        shifts_by_name=working_hours,
+    )
+
+    # Fill in role + cover_needed from the next rota week
+    DAY_IDX_BY_NAME = {'Mon': 0, 'Tue': 1, 'Wed': 2, 'Thu': 3, 'Fri': 4}
+    for row in draft:
+        if next_assignments:
+            target_di = (row['date'] - next_monday).days
+            row['role'] = next_assignments.get(row['name'], {}).get(target_di, '')
+        # Cover required for phones / triage + lender chasing
+        role = row['role'] or ''
+        row['cover_needed'] = role.startswith('Inbound phones') or role == 'Triage + lender chasing'
+
+    if not draft:
+        st.info("No qualifying reward time blocks for this week.")
+    else:
+        st.caption(
+            f"**{len(draft)}** reward block(s) drafted for w/c "
+            f"{next_monday.strftime('%d %b %Y')}. Edit any cell, then Apply."
+        )
+
+        # Build a DataFrame for st.data_editor
+        draft_df = pd.DataFrame([
+            {
+                'Date':        r['date'].strftime('%a %d/%m/%Y'),
+                'Time':        r['time'],
+                'Name':        r['name'],
+                'Role':        r['role'],
+                'Note':        r['note'],
+                'Cover?':     bool(r['cover_needed']),
+                "Who's covering": r['whos_covering'],
+            }
+            for r in draft
+        ])
+
+        edited_df = st.data_editor(
+            draft_df,
+            num_rows='dynamic',   # allows deleting (and adding) rows
+            width='stretch',
+            hide_index=True,
+            column_config={
+                'Date': st.column_config.TextColumn('Date', disabled=True),
+                'Name': st.column_config.TextColumn('Name', disabled=True),
+                'Role': st.column_config.TextColumn('Role', disabled=True),
+                'Time': st.column_config.TextColumn('Time', help='e.g. 2 - 5 or 9 - 12:30'),
+                'Note': st.column_config.TextColumn('Note'),
+                'Cover?': st.column_config.CheckboxColumn('Cover?'),
+                "Who's covering": st.column_config.TextColumn("Who's covering"),
+            },
+            key=f"daily_notes_draft_{reward_friday.isoformat()}",
+        )
+        st.caption(
+            "Hover the leftmost edge of a row to get the row checkbox, then "
+            "press the **Delete** key to remove a row before applying."
+        )
+
+        col_apply, _ = st.columns([1, 2])
+        with col_apply:
+            if st.button("📝 Apply to Daily Notes",
+                          type='primary', use_container_width=True,
+                          help="Appends each row above as a new line in the rota sheet's Daily Notes tab."):
+                # Build rows_to_apply from the edited DataFrame. Match by
+                # name + date string so deleted rows are skipped naturally,
+                # and any added blank rows are also skipped.
+                date_by_label = {
+                    r['date'].strftime('%a %d/%m/%Y'): r['date'] for r in draft
+                }
+                rows_to_apply = []
+                for _, er in edited_df.iterrows():
+                    name = str(er.get('Name') or '').strip()
+                    if not name:
+                        continue   # skip blank / new empty rows
+                    date_label = str(er.get('Date') or '').strip()
+                    target_date = date_by_label.get(date_label)
+                    if target_date is None:
+                        continue   # date column was edited / corrupted — skip
+                    rows_to_apply.append({
+                        'date': target_date,
+                        'time': str(er.get('Time') or '').strip(),
+                        'name': name,
+                        'role': str(er.get('Role') or '').strip(),
+                        'note': str(er.get('Note') or '').strip(),
+                        'cover_needed': bool(er.get('Cover?') or False),
+                        'whos_covering': str(er.get("Who's covering") or '').strip(),
+                    })
+                if not rows_to_apply:
+                    st.warning("No rows to apply — all rows were deleted or blank.")
+                    st.stop()
+                try:
+                    gc = _cached_gspread()
+                    n = append_daily_notes_rows(gc, rows_to_apply)
+                    st.success(
+                        f"Appended {n} row(s) to the Daily Notes tab for "
+                        f"w/c {next_monday.strftime('%d %b %Y')}. "
+                        f"Open the rota sheet to review."
+                    )
+                except Exception as e:
+                    st.error(f"Failed to write Daily Notes rows: {e}")
 
 
 elif page == "⚙️ Pull Rota":
@@ -2028,6 +2203,27 @@ elif page == "⚙️ Pull Rota":
                         st.session_state[f"assignments_{week_key}"] = new_assignments
                         st.session_state[f"phone_agents_{week_key}"] = new_phone_agents
                         st.success(f"Rota loaded for w/c {selected_monday.strftime('%d %b %Y')}.")
+
+                        # Sync Role + Cover Needed on any Daily Notes rows in
+                        # this week so they reflect the freshly-pulled rota
+                        try:
+                            sync = update_daily_notes_roles(gc, selected_monday,
+                                                              new_assignments)
+                            if sync['updated']:
+                                with st.expander(
+                                    f"✏️ Updated {sync['updated']} Daily Notes row(s) "
+                                    f"to match the new rota"
+                                ):
+                                    for line in sync['detail']:
+                                        st.caption(f"  • {line}")
+                            elif sync['unchanged']:
+                                st.caption(
+                                    f"Daily Notes already in sync "
+                                    f"({sync['unchanged']} row(s) checked, no changes)."
+                                )
+                        except Exception as e:
+                            st.warning(f"Couldn't sync Daily Notes roles: {e}")
+
                         st.rerun()
                     else:
                         st.warning("No data found for this week in the rota spreadsheet.")
