@@ -852,15 +852,16 @@ def build_slack_message(assignments, day_idx, lunch_rota=None,
             return f"{whole}h"
         return f"{whole}h {mins}m"
 
-    def _cover_tag(needed):
-        return "⚠️ cover needed" if needed else "no cover needed"
+    # Only annotate entries that actually need cover. Silent when no cover.
+    def _cover_suffix(needed):
+        return " — ⚠️ cover needed" if needed else ""
 
     if reward_entries:
         lines.append("🏆 Reward time")
         for e in reward_entries:
             role_note = f" ({e['main_role']})" if e.get('main_role') else ""
             lines.append(
-                f"{e['name']}: {_fmt_hours(e['hours'])}{role_note} — {_cover_tag(e['cover_needed'])}"
+                f"{e['name']}: {_fmt_hours(e['hours'])}{role_note}{_cover_suffix(e['cover_needed'])}"
             )
         lines.append("")
 
@@ -869,7 +870,7 @@ def build_slack_message(assignments, day_idx, lunch_rota=None,
         for e in half_day_entries:
             role_note = f" — {e['role']}" if e.get('role') else ""
             lines.append(
-                f"{e['name']}: {_fmt_hours(e['hours'])}{role_note} — {_cover_tag(e['cover_needed'])}"
+                f"{e['name']}: {_fmt_hours(e['hours'])}{role_note}{_cover_suffix(e['cover_needed'])}"
             )
         lines.append("")
 
