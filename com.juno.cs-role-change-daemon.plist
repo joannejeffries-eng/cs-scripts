@@ -7,7 +7,7 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/joannejeffries/.pyenv/shims/python3</string>
+    <string>/Library/Developer/CommandLineTools/usr/bin/python3</string>
     <string>/Users/joannejeffries/Documents/GitHub/cs-scripts/role_change_daemon.py</string>
   </array>
 

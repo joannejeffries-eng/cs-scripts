@@ -17,6 +17,13 @@
 #   - Loads + starts each agent.
 #
 # Idempotent — re-running unloads + reloads each plist fresh.
+#
+# ⚠️  One-time macOS setup if you've never run a launchd daemon out of
+#    ~/Documents before: grant Full Disk Access to /Library/Developer/
+#    CommandLineTools/usr/bin/python3 in System Settings → Privacy &
+#    Security → Full Disk Access. Without this, the daemons will crash
+#    immediately with "Operation not permitted" when reading their .py
+#    files from ~/Documents/GitHub/cs-scripts/.
 
 set -euo pipefail
 
@@ -54,6 +61,27 @@ fi
 for d in "${LOG_DIRS[@]}"; do
   mkdir -p "$d"
 done
+
+# ── 2b. Sanity check Full Disk Access — exits early if missing ────────────
+PY="/Library/Developer/CommandLineTools/usr/bin/python3"
+if [[ ! -x "$PY" ]]; then
+  echo "❌ $PY missing — install Xcode Command Line Tools first." >&2
+  exit 1
+fi
+# Try to import a module from the repo using the launchd-style invocation.
+# If FDA is missing, this fails with Errno 1 'Operation not permitted'.
+if ! "$PY" -c "import sys; sys.path.insert(0, '$REPO_DIR'); import compat" 2>/dev/null; then
+  echo ""
+  echo "⚠️  Python at $PY can't read this repo." >&2
+  echo "   Likely Full Disk Access isn't granted." >&2
+  echo ""
+  echo "   Open: System Settings → Privacy & Security → Full Disk Access" >&2
+  echo "   Click +  →  navigate to /Library/Developer/CommandLineTools/usr/bin/" >&2
+  echo "             (press ⇧⌘. in the file picker to see hidden /Library)" >&2
+  echo "             →  select python3  →  Open" >&2
+  echo "   Then re-run this script." >&2
+  exit 1
+fi
 
 # ── 3. Install + (re)load each daemon ─────────────────────────────────────
 mkdir -p "$HOME/Library/LaunchAgents"
