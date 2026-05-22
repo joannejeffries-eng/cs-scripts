@@ -1,0 +1,127 @@
+"""
+Daily auto-pull of reward-time actuals + skips.
+
+Runs as a launchd cron at 06:00 weekdays. Mirrors Jess's pattern for
+cloud-hosted Juno dashboards: schedule a daily pull, drop the data
+somewhere the apps can read, send Jo a heads-up.
+
+Three things happen on each run:
+  1. `refresh_daemon.refresh_now()` pulls fresh actuals + skips from the
+     Looker Postgres (private VPC — Jo's laptop has VPN access). Writes
+     the updated week JSON to both local FS and Google Drive so the
+     cloud rota app sees it on its next interaction.
+  2. `write_daily_actuals_snapshot()` writes a flat human-readable
+     snapshot to the 'Daily Actuals Snapshot' tab on the Reward Time
+     Audit sheet — for Jo to glance at without opening the app.
+  3. A DM goes to Jo confirming the run, or reporting the error.
+
+If the Mac is asleep at 06:00, macOS launchd reruns this on next wake.
+
+Logs to ~/.claude/scheduled-tasks/refresh-daemon/daemon.log (shared
+with the on-demand daemon).
+"""
+from __future__ import annotations
+
+import logging
+import sys
+import traceback
+from datetime import date, datetime
+from pathlib import Path
+
+import requests
+
+from compat import get_slack_token
+import refresh_daemon as rd
+import reward_time as rt
+
+# Jo's Slack user ID — DM target. Posting to a user-ID channel auto-opens
+# the DM, no need to call conversations.open.
+JO_USER_ID = 'U07KFSSCUNT'
+
+LOG_FILE = Path.home() / '.claude/scheduled-tasks/refresh-daemon/daemon.log'
+
+
+def _dm_jo(text: str) -> None:
+    """Best-effort DM. Logs the failure but doesn't raise."""
+    try:
+        r = requests.post(
+            'https://slack.com/api/chat.postMessage',
+            headers={'Authorization': f'Bearer {get_slack_token()}',
+                     'Content-Type': 'application/json'},
+            json={'channel': JO_USER_ID, 'text': text},
+            timeout=10,
+        )
+        data = r.json()
+        if not data.get('ok'):
+            logging.warning(f"DM to Jo failed: {data.get('error')}")
+    except Exception as e:
+        logging.warning(f"DM to Jo blew up: {e}")
+
+
+def main():
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s daily-pull %(levelname)s %(message)s',
+        handlers=[
+            logging.FileHandler(LOG_FILE),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+    started = datetime.now()
+    logging.info("Daily actuals pull starting")
+
+    # ── 1. Pull from Looker ───────────────────────────────────────────
+    try:
+        result = rd.refresh_now()
+        if 'note' in result:
+            logging.info(f"refresh_now no-op: {result['note']}")
+            _dm_jo(f"ℹ️ Daily refresh — {result['note']}")
+            return
+        logging.info(f"refresh_now ok: {result['people']} people, "
+                      f"{len(result['days'])} day(s)")
+    except rt.CloudDBUnreachableError as e:
+        # Shouldn't happen here (we're on Jo's laptop) but surface clearly
+        logging.exception("DB unreachable")
+        _dm_jo(f"❌ Daily refresh failed — DB unreachable. VPN connected?\n```{e}```")
+        return
+    except Exception as e:
+        logging.exception("refresh_now failed")
+        _dm_jo(
+            f"❌ Daily refresh failed at {started.strftime('%a %d %b %H:%M')}.\n"
+            f"```{type(e).__name__}: {e}\n\n"
+            f"{traceback.format_exc()[-600:]}```"
+        )
+        return
+
+    # ── 2. Write the human-readable sheet snapshot ────────────────────
+    snapshot_ok = False
+    try:
+        friday = result['friday']
+        week_data = rt.load_week(friday)
+        rt.write_daily_actuals_snapshot(friday, week_data)
+        snapshot_ok = True
+        logging.info(f"snapshot written for w/c {friday}")
+    except Exception as e:
+        logging.exception("snapshot write failed")
+        # Don't bail — the refresh itself succeeded.
+        _dm_jo(
+            f"⚠️ Daily refresh OK but the sheet snapshot failed.\n"
+            f"```{type(e).__name__}: {e}```"
+        )
+
+    # ── 3. Heads-up DM on success ─────────────────────────────────────
+    if snapshot_ok:
+        days_str = ', '.join(d.strftime('%a %d/%m') for d in result['days'])
+        _dm_jo(
+            f"✅ Daily refresh at {started.strftime('%a %d %b %H:%M')}\n"
+            f"• {result['people']} people across {len(result['days'])} day(s): {days_str}\n"
+            f"• Snapshot tab updated on the Reward Time Audit sheet"
+        )
+
+    duration = (datetime.now() - started).total_seconds()
+    logging.info(f"Daily actuals pull done in {duration:.1f}s")
+
+
+if __name__ == '__main__':
+    main()

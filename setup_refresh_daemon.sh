@@ -1,18 +1,19 @@
 #!/bin/bash
-# One-time setup for the CS Slack-triggered daemons.
+# One-time setup for the CS launchd agents.
 #
-# Two daemons get installed as launchd agents:
-#   1. com.juno.cs-refresh-daemon       — pulls Looker actuals on demand
-#   2. com.juno.cs-role-change-daemon   — captures TL-posted role moves
+# Three agents get installed:
+#   1. com.juno.cs-refresh-daemon       — pulls Looker actuals on demand (Slack-triggered)
+#   2. com.juno.cs-role-change-daemon   — captures TL-posted role moves (Slack-triggered)
+#   3. com.juno.cs-daily-actuals        — daily 06:00 weekday auto-pull (calendar-triggered)
 #
-# Both auto-start at every login and restart on crash.
+# Long-running daemons (1, 2) auto-start at every login and restart on crash.
+# The daily pull (3) fires Mon–Fri at 06:00 (catches up on wake if missed).
 #
 # What this does:
-#   - Writes your $STAFF_APP_LOOKER_POSTGRES_URL to a file the refresh
-#     daemon reads (it doesn't inherit your shell env when launchd
-#     starts it).
-#   - Copies both launchd plists into ~/Library/LaunchAgents/.
-#   - Loads + starts both daemons.
+#   - Writes your $STAFF_APP_LOOKER_POSTGRES_URL to a file the daemons
+#     read (they don't inherit your shell env when launchd starts them).
+#   - Copies the launchd plists into ~/Library/LaunchAgents/.
+#   - Loads + starts each agent.
 #
 # Idempotent — re-running unloads + reloads each plist fresh.
 
@@ -25,6 +26,7 @@ URL_FILE="$SECRETS_DIR/looker-postgres-url"
 DAEMONS=(
   "com.juno.cs-refresh-daemon"
   "com.juno.cs-role-change-daemon"
+  "com.juno.cs-daily-actuals"
 )
 
 LOG_DIRS=(
@@ -77,9 +79,11 @@ done
 
 echo ""
 echo "Test them:"
-echo "  • Refresh:      post '🔄 refresh' in #dry-run-testing-jo"
-echo "  • Role change:  post 'Maisha → triage' in #client-support-leads"
-echo "                  (under today's anchor message — daemon posts it on first weekday poll)"
+echo "  • Refresh:       post '🔄 refresh' in #dry-run-testing-jo"
+echo "  • Role change:   post 'Maisha → triage' in #client-support-leads"
+echo "                   (under today's anchor message — daemon posts it on first weekday poll)"
+echo "  • Daily auto:    launchctl kickstart -k gui/\$(id -u)/com.juno.cs-daily-actuals"
+echo "                   (forces an immediate run; otherwise fires Mon–Fri 06:00)"
 echo ""
 echo "Logs:"
 echo "  tail -f ~/.claude/scheduled-tasks/refresh-daemon/daemon.log"
