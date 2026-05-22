@@ -109,7 +109,7 @@ done
 echo ""
 echo "Test them:"
 echo "  • Refresh:       post '🔄 refresh' in #dry-run-testing-jo"
-echo "  • Role change:   post 'Maisha → triage' in #client-support-leads"
+echo "  • Role change:   post 'Maisha to triage' in #client-support-leads"
 echo "                   (under today's anchor message — daemon posts it on first weekday poll)"
 echo "  • Auto-pull:     launchctl kickstart -k gui/\$(id -u)/com.juno.cs-daily-actuals"
 echo "                   (forces an immediate run; otherwise fires Mon–Fri at"

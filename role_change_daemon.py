@@ -7,7 +7,7 @@ How it works
   #client-support-leads (C093EAUT3HQ):
 
       📋 Role changes for Mon 26 May — please post any moves in this thread.
-      Format: `Maisha → triage` or `Maisha → triage 10:30-12` or `Maisha back`
+      Format: `Maisha to triage` or `Maisha to triage 10:30-12` or `Maisha back`
 
   The thread ts is saved in `anchors.json` so subsequent polls scope to
   that thread via `conversations.replies`.
@@ -52,7 +52,7 @@ LAST_SEEN_FILE = STATE_DIR / 'last_seen_ts'
 LOG_FILE = STATE_DIR / 'daemon.log'
 
 ANCHOR_HEADER = "📋 Role changes for {day_label} — please post any moves in this thread."
-ANCHOR_HELP = ("Format: `Maisha → triage` or `Maisha → triage 10:30-12` "
+ANCHOR_HELP = ("Format: `Maisha to triage` or `Maisha to triage 10:30-12` "
                 "or `Maisha back`")
 
 
@@ -167,15 +167,15 @@ def _format_confirmation(applied: dict) -> str:
     """Friendly reply text for a captured move."""
     if applied.get('action') == 'back-noop':
         return (f"ℹ️ Couldn't find an open move for *{applied['name']}* — "
-                f"if you meant to log an explicit role, try `{applied['name']} → triage`.")
+                f"if you meant to log an explicit role, try `{applied['name']} to triage`.")
     if applied.get('action') == 'back':
         return (f"↩️ *{applied['name']}* closed at {applied.get('end_time', '?')}"
-                f"{' → ' + applied['to_role'] if applied.get('to_role') else ''}")
-    parts = [f"✅ *{applied['name']}* → {applied.get('to_role', '?')}"]
+                f"{' back to *' + applied['to_role'] + '*' if applied.get('to_role') else ''}")
+    parts = [f"✅ *{applied['name']}* to *{applied.get('to_role', '?')}*"]
     if applied.get('from_role'):
         parts.append(f"(from *{applied['from_role']}*)")
     if applied.get('start_time') or applied.get('end_time'):
-        parts.append(f"{applied.get('start_time', '?')} → "
+        parts.append(f"{applied.get('start_time', '?')} to "
                       f"{applied.get('end_time') or 'end of shift'}")
     return ' '.join(parts)
 
@@ -225,7 +225,7 @@ def poll_once(today: date, last_seen: str, anchor_ts: str) -> str:
             _thread_reply(
                 ROLE_CHANGES_CHANNEL, anchor_ts,
                 f"❌ Couldn't parse <@{noted_by}>'s message. "
-                f"Try `Name → role` or `Name back`. "
+                f"Try `Name to role` or `Name back`. "
                 f"Roles: phones, triage, ics, chasing, t+lc."
             )
             last_seen = ts

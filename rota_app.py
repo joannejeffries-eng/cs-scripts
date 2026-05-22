@@ -1062,7 +1062,7 @@ elif page == "📡 Live Rota":
     st.caption(
         "Roles as actually happening — overlays mid-day moves captured "
         "from #client-support-leads on top of the planned rota. "
-        "TLs post `Maisha → triage` etc. in today's anchor thread."
+        "TLs post `Maisha to triage` etc. in today's anchor thread."
     )
 
     picked_day = st.date_input(
