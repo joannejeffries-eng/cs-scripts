@@ -255,9 +255,8 @@ def pull_day_data(target_date):
     Returns {first_name: {metric: value}}."""
     import psycopg2
 
-    db_url = os.environ.get(DB_URL_KEY)
-    if not db_url:
-        raise RuntimeError(f"Environment variable {DB_URL_KEY} not set")
+    from compat import get_postgres_url
+    db_url = get_postgres_url()
 
     conn = psycopg2.connect(db_url)
     cur = conn.cursor()
@@ -328,9 +327,8 @@ def pull_skips(friday):
     Returns {first_name: skip_count}."""
     import psycopg2
 
-    db_url = os.environ.get(DB_URL_KEY)
-    if not db_url:
-        raise RuntimeError(f"Environment variable {DB_URL_KEY} not set")
+    from compat import get_postgres_url
+    db_url = get_postgres_url()
 
     dates = get_weekday_dates(friday)
     start = min(dates)
@@ -366,20 +364,27 @@ def pull_skips(friday):
 
 
 # ── State persistence ───────────────────────────────────────────────────────
+# Local: files under STATE_DIR (~/.claude/scheduled-tasks/reward-time/).
+# Cloud: files inside the cs-scripts-state Google Drive folder.
+# drive_state.{read,write}_json_either handles the routing.
 
 def _ensure_state_dir():
     STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _week_filename(friday):
+    """Bare filename for a reward week — used both locally and on Drive."""
+    return f"week_{friday.isoformat()}.json"
+
+
 def _week_file(friday):
-    """Path to the JSON file for a given reward week."""
-    return STATE_DIR / f"week_{friday.isoformat()}.json"
+    """Local Path for a reward week's JSON file."""
+    return STATE_DIR / _week_filename(friday)
 
 
 def save_week(friday, week_data):
     """Save a week's reward data to JSON.
     week_data: {name: PersonWeek}"""
-    _ensure_state_dir()
     data = {}
     for name, pw in week_data.items():
         days_ser = {}
@@ -413,15 +418,16 @@ def save_week(friday, week_data):
             'jo_decision_at': pw.jo_decision_at,
             'jo_question_text': pw.jo_question_text,
         }
-    _week_file(friday).write_text(json.dumps(data, indent=2))
+    from drive_state import write_json_either
+    write_json_either(_week_file(friday), _week_filename(friday), data)
 
 
 def load_week(friday):
     """Load a week's reward data from JSON. Returns {name: PersonWeek} or empty dict."""
-    path = _week_file(friday)
-    if not path.exists():
+    from drive_state import read_json_either
+    raw = read_json_either(_week_file(friday), _week_filename(friday))
+    if not raw:
         return {}
-    raw = json.loads(path.read_text())
     week_data = {}
     for name, d in raw.items():
         pw = PersonWeek(name=name)
@@ -1327,8 +1333,8 @@ def build_tl_messages(friday, week_data):
 # ── Google Sheets integration ───────────────────────────────────────────────
 
 def _get_creds():
-    from google.oauth2.credentials import Credentials
-    return Credentials.from_authorized_user_file(str(CREDS_PATH))
+    from compat import get_google_credentials
+    return get_google_credentials()
 
 
 def _get_gspread():
@@ -1342,23 +1348,20 @@ def _get_drive_service():
 
 
 def load_reward_state():
-    """Load reward sheet ID from state file."""
+    """Load reward sheet ID from state file (local or Drive)."""
     global REWARD_SHEET_ID
-    _ensure_state_dir()
-    if STATE_FILE.exists():
-        data = json.loads(STATE_FILE.read_text())
-        REWARD_SHEET_ID = data.get('reward_sheet_id')
+    from drive_state import read_json_either
+    data = read_json_either(STATE_FILE, 'state.json') or {}
+    REWARD_SHEET_ID = data.get('reward_sheet_id') or REWARD_SHEET_ID
     return REWARD_SHEET_ID
 
 
 def save_reward_state():
-    """Save reward sheet ID to state file."""
-    _ensure_state_dir()
-    data = {}
-    if STATE_FILE.exists():
-        data = json.loads(STATE_FILE.read_text())
+    """Save reward sheet ID to state file (local or Drive)."""
+    from drive_state import read_json_either, write_json_either
+    data = read_json_either(STATE_FILE, 'state.json') or {}
     data['reward_sheet_id'] = REWARD_SHEET_ID
-    STATE_FILE.write_text(json.dumps(data, indent=2))
+    write_json_either(STATE_FILE, 'state.json', data)
 
 
 def create_reward_sheet():

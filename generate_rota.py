@@ -238,8 +238,8 @@ LUNCH_SLOTS = ['12:00-13:00', '13:00-14:00', '14:00-15:00']
 # ── Google Sheets helpers ───────────────────────────────────────────────────
 
 def get_creds():
-    from google.oauth2.credentials import Credentials
-    return Credentials.from_authorized_user_file(str(CREDS_PATH))
+    from compat import get_google_credentials
+    return get_google_credentials()
 
 
 def get_gspread():

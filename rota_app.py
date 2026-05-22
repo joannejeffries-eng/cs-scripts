@@ -12,6 +12,10 @@ from pathlib import Path
 
 st.set_page_config(page_title="CS Rota Manager", page_icon="📋", layout="wide")
 
+# Password gate — blocks everything below until the user signs in
+from auth import require_login
+require_login()
+
 # ── Shared brand polish (mirrors tl_app_common.py) ─────────────────────────
 st.markdown("""
 <style>
@@ -156,7 +160,10 @@ WIDER_TEAM = ['Bella', 'Clare', 'Cris', 'Erika', 'Harriet',
 
 
 # ── Slack ──────────────────────────────────────────────────────────────────
-SLACK_TOKEN_PATH = Path.home() / '.config/juno/claude-code/slack-token'
+# Token resolution goes through compat.get_slack_token(): st.secrets on cloud,
+# ~/.config/juno/claude-code/slack-token locally.
+from compat import get_slack_token
+SLACK_TOKEN_PATH = Path.home() / '.config/juno/claude-code/slack-token'  # kept for backward refs
 SLACK_CHANNEL_MORNING_MSG = 'C0AUP24HQPP'      # #dry-run-testing-jo
 SLACK_CHANNEL_CS_MORNING = 'C02TP0FBM32'        # real CS channel — scheduled 07:30 post lands here
 
@@ -183,30 +190,32 @@ def _sanitize_for_dry_run(text: str) -> str:
 LUNCH_COVER_DIR = Path.home() / '.claude/scheduled-tasks/morning-message'
 
 
+def _lunch_cover_filename(monday):
+    return f"lunch_cover_{monday.isoformat()}.json"
+
+
 def _lunch_cover_file(monday):
-    return LUNCH_COVER_DIR / f"lunch_cover_{monday.isoformat()}.json"
+    return LUNCH_COVER_DIR / _lunch_cover_filename(monday)
 
 
 def load_lunch_overrides(monday):
-    """Return {day_idx: name} or {} if none saved."""
-    import json
-    p = _lunch_cover_file(monday)
-    if not p.exists():
+    """Return {day_idx: name} or {} if none saved. Local or Drive depending
+    on whether we're running on Streamlit Cloud."""
+    from drive_state import read_json_either
+    raw = read_json_either(_lunch_cover_file(monday), _lunch_cover_filename(monday))
+    if not raw:
         return {}
     try:
-        raw = json.loads(p.read_text())
         return {int(k): v for k, v in raw.items()}
     except Exception:
         return {}
 
 
 def save_lunch_overrides(monday, overrides):
-    """Persist {day_idx: name} to disk."""
-    import json
-    LUNCH_COVER_DIR.mkdir(parents=True, exist_ok=True)
-    _lunch_cover_file(monday).write_text(
-        json.dumps({str(k): v for k, v in overrides.items() if v}, indent=2)
-    )
+    """Persist {day_idx: name} (local or Drive)."""
+    from drive_state import write_json_either
+    payload = {str(k): v for k, v in overrides.items() if v}
+    write_json_either(_lunch_cover_file(monday), _lunch_cover_filename(monday), payload)
 
 
 # ── Scheduled morning messages ──────────────────────────────────────────────
@@ -215,30 +224,31 @@ def save_lunch_overrides(monday, overrides):
 SCHEDULED_DIR = Path.home() / '.claude/scheduled-tasks/morning-message'
 
 
+def _scheduled_filename(monday):
+    return f"scheduled_{monday.isoformat()}.json"
+
+
 def _scheduled_file(monday):
-    return SCHEDULED_DIR / f"scheduled_{monday.isoformat()}.json"
+    return SCHEDULED_DIR / _scheduled_filename(monday)
 
 
 def load_scheduled_messages(monday):
     """Return {day_idx: scheduled_info_dict} or {} if none saved."""
-    import json
-    p = _scheduled_file(monday)
-    if not p.exists():
+    from drive_state import read_json_either
+    raw = read_json_either(_scheduled_file(monday), _scheduled_filename(monday))
+    if not raw:
         return {}
     try:
-        raw = json.loads(p.read_text())
         return {int(k): v for k, v in raw.items()}
     except Exception:
         return {}
 
 
 def save_scheduled_messages(monday, sched):
-    """Persist scheduled-message state."""
-    import json
-    SCHEDULED_DIR.mkdir(parents=True, exist_ok=True)
-    _scheduled_file(monday).write_text(
-        json.dumps({str(k): v for k, v in sched.items() if v}, indent=2)
-    )
+    """Persist scheduled-message state (local or Drive)."""
+    from drive_state import write_json_either
+    payload = {str(k): v for k, v in sched.items() if v}
+    write_json_either(_scheduled_file(monday), _scheduled_filename(monday), payload)
 
 
 def _seven_thirty_uk_unix(day_date):
@@ -256,7 +266,7 @@ def _seven_thirty_uk_unix(day_date):
 
 def schedule_slack_message(channel, text, post_at_ts):
     """Call chat.scheduleMessage. Returns scheduled_message_id."""
-    token = SLACK_TOKEN_PATH.read_text().strip()
+    token = get_slack_token()
     resp = requests.post(
         'https://slack.com/api/chat.scheduleMessage',
         headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
@@ -272,7 +282,7 @@ def schedule_slack_message(channel, text, post_at_ts):
 def delete_scheduled_message(channel, scheduled_message_id):
     """Cancel a previously scheduled message. Idempotent — returns None on
     'invalid_scheduled_message_id' (e.g. already sent or already deleted)."""
-    token = SLACK_TOKEN_PATH.read_text().strip()
+    token = get_slack_token()
     resp = requests.post(
         'https://slack.com/api/chat.deleteScheduledMessage',
         headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
@@ -291,7 +301,7 @@ def delete_scheduled_message(channel, scheduled_message_id):
 def send_slack_message(channel, text, link_names=False):
     """Post to Slack. Pass link_names=True when the message contains mentions
     that must be resolved & pinged (e.g. <@U…> tagging the cover person)."""
-    token = SLACK_TOKEN_PATH.read_text().strip()
+    token = get_slack_token()
     payload = {'channel': channel, 'text': text}
     if link_names:
         payload['link_names'] = True
@@ -338,7 +348,7 @@ def _slack_users_directory():
     users.list and builds {workspace_name: user_id}. Workspace name is
     typically firstname.lastname — much more stable than real_name.
     """
-    token = SLACK_TOKEN_PATH.read_text().strip()
+    token = get_slack_token()
     directory = {}
     cursor = None
     while True:
@@ -396,7 +406,7 @@ def _resolve_slack_user_id(name: str):
 
 def _open_dm_channel(user_id: str):
     """Open (or fetch) a 1-1 DM channel ID for a user."""
-    token = SLACK_TOKEN_PATH.read_text().strip()
+    token = get_slack_token()
     resp = requests.post(
         'https://slack.com/api/conversations.open',
         headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},

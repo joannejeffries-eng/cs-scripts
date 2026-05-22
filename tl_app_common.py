@@ -45,7 +45,8 @@ from reward_time import (
 
 # Jo's dry-run channel for TL submissions
 SLACK_DRY_RUN_CHANNEL = 'C0AUP24HQPP'  # #dry-run-testing-jo
-SLACK_TOKEN_PATH = Path.home() / '.config/juno/claude-code/slack-token'
+SLACK_TOKEN_PATH = Path.home() / '.config/juno/claude-code/slack-token'  # legacy ref
+from compat import get_slack_token
 
 # ── Brand palette (mirrors setup_tl_view.py) ───────────────────────────────
 JUNO_BLUE = '#0F5CB8'
@@ -253,7 +254,7 @@ def _hero(tl_name: str, reward_friday: date, reward_end: date) -> None:
 
 def _send_slack(channel: str, text: str) -> None:
     """Post a message to Slack. Raises on API failure."""
-    token = SLACK_TOKEN_PATH.read_text().strip()
+    token = get_slack_token()
     resp = requests.post(
         'https://slack.com/api/chat.postMessage',
         headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
@@ -761,6 +762,11 @@ def run_app(tl_name: str) -> None:
         page_icon='🏆',
         layout='wide',
     )
+
+    # Password gate — blocks everything below until the user signs in
+    from auth import require_login
+    require_login()
+
     _inject_css()
 
     team_members = TL_TEAMS[tl_name]
