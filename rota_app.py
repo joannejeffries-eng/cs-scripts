@@ -1983,7 +1983,7 @@ elif page == "🏆 Reward Time":
     st.metric("Qualified", f"{qualified_count} / {total_count}")
 
     # Write week summary to Google Sheet when signing off
-    col_summary, col_send1, col_send2 = st.columns(3)
+    col_summary, col_send = st.columns(2)
     with col_summary:
         if st.button("💾 Save week summary to sheet", use_container_width=True):
             try:
@@ -1992,203 +1992,13 @@ elif page == "🏆 Reward Time":
             except Exception as e:
                 st.error(f"Failed to write summary: {e}")
 
-    with col_send1:
+    with col_send:
         if st.button("📤 Send to #dry-run-testing-jo", type="primary", use_container_width=True):
             try:
                 write_week_summary(reward_friday, week_data)
                 msg = build_reward_slack_message(reward_friday, week_data)
                 send_slack_message(SLACK_CHANNEL_MORNING_MSG, msg)
                 st.success("Reward time summary sent to #dry-run-testing-jo")
-            except Exception as e:
-                st.error(f"Failed: {e}")
-
-    # ── TL approval queue ──
-    st.divider()
-    st.markdown("### 📥 Approval Queue")
-    st.caption("Each TL submits their team here. Approve, or ask a question — then post the decision to the reward time channel.")
-
-    SLACK_REWARD_CHANNEL = 'C0AUP24HQPP'  # #dry-run-testing-jo (local/test); switch to C0B103KEJLU when live
-
-    submissions_by_tl = {tl: [] for tl in TL_TEAMS}
-    for tl, members in TL_TEAMS.items():
-        for name in members:
-            pw = week_data.get(name)
-            if pw and pw.tl_submitted_at and pw.days_worked > 0:
-                submissions_by_tl[tl].append(name)
-
-    any_submissions = any(submissions_by_tl.values())
-    if not any_submissions:
-        st.info("No TL submissions yet for this reward week. Once a team lead hits **Submit team to Jo** in their app, their team will appear here.")
-    else:
-        # Top-level stats
-        total_submitted = sum(len(v) for v in submissions_by_tl.values())
-        total_approved = sum(1 for v in submissions_by_tl.values() for n in v if week_data[n].jo_decision == 'approved')
-        total_pending = sum(1 for v in submissions_by_tl.values() for n in v if week_data[n].jo_decision == '')
-        total_question = sum(1 for v in submissions_by_tl.values() for n in v if week_data[n].jo_decision == 'question')
-
-        s1, s2, s3, s4 = st.columns(4)
-        s1.metric('Submitted', total_submitted)
-        s2.metric('Pending', total_pending)
-        s3.metric('Approved', total_approved)
-        s4.metric('Questions', total_question)
-
-        # Tabs per TL — only show TLs who have something
-        tls_with_subs = [tl for tl in submissions_by_tl if submissions_by_tl[tl]]
-        tab_labels = []
-        for tl in tls_with_subs:
-            names = submissions_by_tl[tl]
-            pending = sum(1 for n in names if week_data[n].jo_decision == '')
-            badge = f" ({pending} pending)" if pending else ' ✓'
-            tab_labels.append(f"{tl}{badge}")
-
-        tl_tabs = st.tabs(tab_labels)
-        for tab, tl in zip(tl_tabs, tls_with_subs):
-            with tab:
-                names = submissions_by_tl[tl]
-                pending = sum(1 for n in names if week_data[n].jo_decision == '')
-                approved = sum(1 for n in names if week_data[n].jo_decision == 'approved')
-                questioned = sum(1 for n in names if week_data[n].jo_decision == 'question')
-                st.caption(f"{len(names)} submitted · {pending} pending · {approved} approved · {questioned} ❓")
-
-                for name in names:
-                    pw = week_data[name]
-                    eligible, level, hours, reason = calculate_eligibility(pw)
-                    if pw.tl_request_level == 'deny':
-                        ask = '❌ Deny'
-                    elif pw.tl_request_level == 'base':
-                        ask = '✅ Grant Base'
-                    elif pw.tl_request_level == 'stretch':
-                        ask = '⭐ Grant Stretch'
-                    else:
-                        ask = f"Auto → {'⭐ Stretch' if level == 'stretch' else '✅ Base' if eligible else '❌ None'}"
-
-                    # Status pill
-                    if pw.jo_decision == 'approved':
-                        status_html = '<span class="aq-status-green">✅ Approved</span>'
-                    elif pw.jo_decision == 'question':
-                        status_html = '<span class="aq-status-amber">❓ Question raised</span>'
-                    else:
-                        status_html = '<span class="aq-status-blue">⏳ Pending</span>'
-
-                    expander_label = f"{name}  —  TL asks: {ask}"
-                    with st.expander(expander_label, expanded=(pw.jo_decision == '')):
-                        st.markdown(status_html, unsafe_allow_html=True)
-                        if pw.tl_notes:
-                            st.markdown(f"**TL note:** _{pw.tl_notes}_")
-                        st.caption(
-                            f"Auto result: "
-                            f"{'⭐ Stretch' if level == 'stretch' else '✅ Base' if eligible else '❌ None'}"
-                            f"{' · ' + format_reward_hours(hours) if eligible else ''} — {reason}"
-                        )
-                        if pw.jo_decision == 'question':
-                            st.warning(f"Your question: _{pw.jo_question_text}_")
-
-                        c_app, c_q = st.columns([1, 2])
-                        with c_app:
-                            if st.button('✅ Approve', key=f"jo_approve_{rw_key}_{name}",
-                                         type='primary', width='stretch'):
-                                from datetime import datetime as _dt
-                                pw.jo_decision = 'approved'
-                                pw.jo_decision_at = _dt.now().isoformat(timespec='seconds')
-                                pw.jo_question_text = ''
-                                if pw.tl_request_level in ('base', 'stretch', 'deny'):
-                                    add_override(pw, 'override_eligible', pw.override_eligible,
-                                                 pw.tl_request_level,
-                                                 f"Approved TL request: {pw.tl_notes or 'no reason'}")
-                                    pw.override_eligible = pw.tl_request_level
-                                save_week(reward_friday, week_data)
-                                try:
-                                    write_audit_entry(reward_friday, name, 'jo_decision', '', 'approved',
-                                                      pw.tl_notes or 'TL request approved')
-                                except Exception:
-                                    pass
-                                st.rerun()
-                            if pw.jo_decision and st.button('↩️ Clear decision',
-                                                              key=f"jo_clear_{rw_key}_{name}",
-                                                              width='stretch'):
-                                pw.jo_decision = ''
-                                pw.jo_decision_at = ''
-                                pw.jo_question_text = ''
-                                save_week(reward_friday, week_data)
-                                st.rerun()
-                        with c_q:
-                            q_text = st.text_input(
-                                'Question for the TL', value=pw.jo_question_text,
-                                key=f"jo_q_text_{rw_key}_{name}",
-                                placeholder='e.g. why are you asking for stretch when Thu was below base?',
-                            )
-                            if st.button('❓ Ask question', key=f"jo_question_{rw_key}_{name}",
-                                         width='stretch'):
-                                if not q_text.strip():
-                                    st.error('Type a question first.')
-                                else:
-                                    from datetime import datetime as _dt
-                                    pw.jo_decision = 'question'
-                                    pw.jo_decision_at = _dt.now().isoformat(timespec='seconds')
-                                    pw.jo_question_text = q_text.strip()
-                                    save_week(reward_friday, week_data)
-                                    try:
-                                        write_audit_entry(reward_friday, name, 'jo_decision',
-                                                          '', 'question', q_text.strip())
-                                    except Exception:
-                                        pass
-                                    st.rerun()
-
-        # Build summary message for the reward time channel
-        def _build_decision_message():
-            lines = [f"🏆 *Reward Time Decisions — w/c {reward_friday.strftime('%d %b %Y')}*", '']
-            had_anything = False
-            for tl, names in submissions_by_tl.items():
-                approved_list = [n for n in names if week_data[n].jo_decision == 'approved']
-                question_list = [n for n in names if week_data[n].jo_decision == 'question']
-                if not approved_list and not question_list:
-                    continue
-                had_anything = True
-                lines.append(f"*{tl}'s team*")
-                for n in approved_list:
-                    pw = week_data[n]
-                    eligible, level, hours, _ = calculate_eligibility(pw)
-                    if eligible:
-                        result = f"{'⭐ Stretch' if level == 'stretch' else '✅ Base'} — {format_reward_hours(hours)}"
-                    else:
-                        result = '❌ None'
-                    lines.append(f"• ✅ *Jo has approved the reward time* for {n} — {result}")
-                for n in question_list:
-                    pw = week_data[n]
-                    lines.append(f"• ❓ *Jo has a question about reward time* for {n} — {pw.jo_question_text}")
-                lines.append('')
-            return '\n'.join(lines) if had_anything else ''
-
-        st.divider()
-        decision_msg = _build_decision_message()
-        col_post1, col_post2 = st.columns([2, 1])
-        with col_post1:
-            with st.expander('👀 Preview the channel post'):
-                st.text_area('Preview', value=decision_msg or '(nothing decided yet)',
-                             height=260, key=f"decision_preview_{rw_key}",
-                             label_visibility='collapsed')
-        with col_post2:
-            st.write('')
-            if st.button('📤 Post decisions to reward time channel',
-                         type='primary', width='stretch',
-                         disabled=not decision_msg):
-                try:
-                    send_slack_message(SLACK_REWARD_CHANNEL, decision_msg)
-                    st.success('Posted to reward time channel (dry-run).')
-                except Exception as e:
-                    st.error(f'Failed to send: {e}')
-
-    # TL_PEGASUS_CHANNELS now defined globally near build_cover_notifications.
-
-    with col_send2:
-        if st.button("📤 Send per-TL messages", use_container_width=True):
-            try:
-                write_week_summary(reward_friday, week_data)
-                tl_messages = build_tl_messages(reward_friday, week_data)
-                for tl, msg in tl_messages.items():
-                    channel = TL_PEGASUS_CHANNELS.get(tl, SLACK_CHANNEL_MORNING_MSG)
-                    send_slack_message(channel, msg)
-                st.success(f"Sent {len(tl_messages)} TL messages to their pegasus channels")
             except Exception as e:
                 st.error(f"Failed: {e}")
 
