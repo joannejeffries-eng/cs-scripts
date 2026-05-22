@@ -203,14 +203,19 @@ def poll_once(today: date, last_seen: str, anchor_ts: str) -> str:
                 continue
         except ValueError:
             continue
-        # Skip our own thread replies
+        # Skip our own thread replies. The anchor message is also "ours",
+        # so any reply with the same user ID is a candidate. We then
+        # confirm by checking for the prefixes the daemon writes — covering
+        # both the literal Unicode glyphs we post AND the :shortcode:
+        # forms Slack returns when it reflects the messages back to us.
         if msg.get('user') == resp.get('messages', [{}])[0].get('user'):
-            # The first message in the thread is the anchor (ours).
-            # Subsequent ones with the same user could be our reaction
-            # confirmations — but those go via thread_ts and don't show
-            # up in conversations.replies as separate messages. Just be
-            # safe: skip messages whose text looks like our confirmation.
-            if (msg.get('text', '').startswith(('✅ ', '↩️ ', 'ℹ️ ', '❌ '))):
+            text_so_far = msg.get('text', '')
+            our_prefixes = (
+                '✅ ', '↩️ ', 'ℹ️ ', '❌ ',
+                ':white_check_mark:', ':leftwards_arrow_with_hook:',
+                ':information_source:', ':x:',
+            )
+            if text_so_far.startswith(our_prefixes):
                 last_seen = ts
                 _write_last_seen(last_seen)
                 continue
