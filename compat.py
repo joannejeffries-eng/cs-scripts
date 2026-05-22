@@ -15,6 +15,7 @@ from pathlib import Path
 
 SLACK_TOKEN_LOCAL_PATH = Path.home() / '.config/juno/claude-code/slack-token'
 GOOGLE_CREDS_LOCAL_PATH = Path.home() / '.config/juno/claude-code/google-credentials.json'
+LOOKER_POSTGRES_LOCAL_PATH = Path.home() / '.config/juno/claude-code/looker-postgres-url'
 LOOKER_POSTGRES_ENV_VAR = 'STAFF_APP_LOOKER_POSTGRES_URL'
 
 
@@ -60,17 +61,23 @@ def get_slack_token() -> str:
 
 
 def get_postgres_url() -> str:
-    """Return the Looker Postgres URL. Cloud: st.secrets['LOOKER_POSTGRES_URL'].
-    Local: STAFF_APP_LOOKER_POSTGRES_URL env var."""
+    """Return the Looker Postgres URL.
+    Cloud: st.secrets['LOOKER_POSTGRES_URL'].
+    Local: STAFF_APP_LOOKER_POSTGRES_URL env var, falling back to
+    ~/.config/juno/claude-code/looker-postgres-url (used by long-running
+    daemons that don't inherit Jo's shell env)."""
     url = get_secret_str('LOOKER_POSTGRES_URL')
     if url:
         return url
     env = os.environ.get(LOOKER_POSTGRES_ENV_VAR)
     if env:
         return env
+    if LOOKER_POSTGRES_LOCAL_PATH.exists():
+        return LOOKER_POSTGRES_LOCAL_PATH.read_text().strip()
     raise RuntimeError(
-        "No Looker Postgres URL found — set st.secrets['LOOKER_POSTGRES_URL'] (cloud) "
-        f"or {LOOKER_POSTGRES_ENV_VAR} env var (local)."
+        "No Looker Postgres URL found — set st.secrets['LOOKER_POSTGRES_URL'] (cloud), "
+        f"{LOOKER_POSTGRES_ENV_VAR} env var (local), or "
+        f"create {LOOKER_POSTGRES_LOCAL_PATH} (for the refresh daemon)."
     )
 
 

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.juno.cs-refresh-daemon</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/joannejeffries/.pyenv/shims/python3</string>
+    <string>/Users/joannejeffries/Documents/GitHub/cs-scripts/refresh_daemon.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/joannejeffries/Documents/GitHub/cs-scripts</string>
+
+  <!-- Auto-start at login and restart on crash -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Throttle restarts to once every 30 s if it keeps failing -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <!-- All output goes to the daemon's own log; these capture launchd-level errors -->
+  <key>StandardOutPath</key>
+  <string>/Users/joannejeffries/.claude/scheduled-tasks/refresh-daemon/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/joannejeffries/.claude/scheduled-tasks/refresh-daemon/launchd.err.log</string>
+</dict>
+</plist>
