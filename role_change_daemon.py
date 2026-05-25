@@ -45,6 +45,13 @@ import role_changes as rc
 # ── Config ──────────────────────────────────────────────────────────────────
 
 ROLE_CHANGES_CHANNEL = 'U07KFSSCUNT'   # Jo's DM (temporary — was #client-support-leads C093EAUT3HQ)
+
+# Resolved channel ID (D... for a DM, or the channel ID for a channel).
+# Filled lazily by _resolved_channel() at first use because:
+#   - chat.postMessage accepts a U... user ID and auto-opens the DM
+#   - conversations.replies / .open need the actual D... channel
+# Cached for the daemon's lifetime — DM channel IDs don't change.
+_RESOLVED_CHANNEL: str | None = None
 POLL_INTERVAL_SECONDS = 30
 
 STATE_DIR = Path.home() / '.claude/scheduled-tasks/role-changes'
@@ -93,6 +100,40 @@ def _thread_reply(channel: str, ts: str, text: str) -> None:
         logging.warning(f"thread reply failed: {resp.get('error')}")
 
 
+# ── Channel resolution ─────────────────────────────────────────────────────
+
+def _resolved_channel() -> str | None:
+    """Return a usable channel ID for all Slack API calls.
+
+    If ROLE_CHANGES_CHANNEL is a user ID (starts with 'U'), open a DM
+    once and cache the resulting D... channel ID. Otherwise pass through.
+
+    Slack's chat.postMessage forgives U... and auto-opens the DM, but
+    conversations.replies (and reactions.add on its threads) need the
+    D... channel ID. Doing the open up-front means the rest of the
+    daemon doesn't have to know the difference.
+    """
+    global _RESOLVED_CHANNEL
+    if _RESOLVED_CHANNEL is not None:
+        return _RESOLVED_CHANNEL
+    if not ROLE_CHANGES_CHANNEL.startswith('U'):
+        _RESOLVED_CHANNEL = ROLE_CHANGES_CHANNEL
+        return _RESOLVED_CHANNEL
+    resp = _slack_post('conversations.open', {'users': ROLE_CHANGES_CHANNEL})
+    if not resp.get('ok'):
+        logging.error(f"conversations.open failed for {ROLE_CHANGES_CHANNEL}: "
+                       f"{resp.get('error')}")
+        return None
+    channel_id = resp.get('channel', {}).get('id')
+    if not channel_id:
+        logging.error(f"conversations.open returned no channel.id for "
+                       f"{ROLE_CHANGES_CHANNEL}: {resp}")
+        return None
+    _RESOLVED_CHANNEL = channel_id
+    logging.info(f"Resolved {ROLE_CHANGES_CHANNEL} → DM channel {channel_id}")
+    return _RESOLVED_CHANNEL
+
+
 # ── State persistence ──────────────────────────────────────────────────────
 
 def _load_anchors() -> dict:
@@ -133,10 +174,13 @@ def _get_or_create_anchor(today: date) -> str | None:
     if key in anchors:
         return anchors[key]
 
+    channel = _resolved_channel()
+    if channel is None:
+        return None
     text = (ANCHOR_HEADER.format(day_label=today.strftime('%a %d %b %Y'))
             + '\n' + ANCHOR_HELP)
     resp = _slack_post('chat.postMessage',
-                        {'channel': ROLE_CHANGES_CHANNEL, 'text': text})
+                        {'channel': channel, 'text': text})
     if not resp.get('ok'):
         logging.error(f"failed to post anchor: {resp.get('error')}")
         return None
@@ -183,8 +227,11 @@ def _format_confirmation(applied: dict) -> str:
 
 def poll_once(today: date, last_seen: str, anchor_ts: str) -> str:
     """One poll cycle. Returns updated last_seen."""
+    channel = _resolved_channel()
+    if channel is None:
+        return last_seen
     resp = _slack_get('conversations.replies', {
-        'channel': ROLE_CHANGES_CHANNEL,
+        'channel': channel,
         'ts': anchor_ts,
         'oldest': last_seen,
         'limit': 100,
@@ -227,9 +274,9 @@ def poll_once(today: date, last_seen: str, anchor_ts: str) -> str:
 
         parsed = rc.parse_role_change_message(text, ts, noted_by=noted_by)
         if parsed is None:
-            _react(ROLE_CHANGES_CHANNEL, ts, 'x')
+            _react(channel, ts, 'x')
             _thread_reply(
-                ROLE_CHANGES_CHANNEL, anchor_ts,
+                channel, anchor_ts,
                 f"❌ Couldn't parse <@{noted_by}>'s message. "
                 f"Try `Name to role` or `Name back`. "
                 f"Roles: phones, triage, ics, chasing, t+lc."
@@ -242,13 +289,13 @@ def poll_once(today: date, last_seen: str, anchor_ts: str) -> str:
             if rota is None:
                 rota = _todays_rota_assignments(today)
             applied = rc.apply_move(today, parsed, rota)
-            _react(ROLE_CHANGES_CHANNEL, ts, 'white_check_mark')
-            _thread_reply(ROLE_CHANGES_CHANNEL, anchor_ts,
+            _react(channel, ts, 'white_check_mark')
+            _thread_reply(channel, anchor_ts,
                            _format_confirmation(applied))
         except Exception as e:
             logging.exception("apply_move failed")
-            _react(ROLE_CHANGES_CHANNEL, ts, 'x')
-            _thread_reply(ROLE_CHANGES_CHANNEL, anchor_ts,
+            _react(channel, ts, 'x')
+            _thread_reply(channel, anchor_ts,
                            f"❌ Captured but couldn't save: {e}")
 
         last_seen = ts
