@@ -1061,8 +1061,9 @@ elif page == "📡 Live Rota":
     st.header("📡 Live Rota")
     st.caption(
         "Roles as actually happening — overlays mid-day moves captured "
-        "from #client-support-leads on top of the planned rota. "
-        "TLs post `Maisha to triage` etc. in today's anchor thread."
+        "from Jo's DM on top of the planned rota "
+        "(temporary while testing; will move back to #client-support-leads). "
+        "Post `Maisha to triage` etc. in today's anchor thread."
     )
 
     picked_day = st.date_input(
@@ -1600,8 +1601,8 @@ elif page == "🏆 Reward Time":
         apply_moves_clicked = st.button(
             "🧩 Apply moves",
             use_container_width=True,
-            help="Apply captured mid-day role moves from #client-support-leads — "
-                 "splits each day automatically using moves ≥ 30 min.",
+            help="Apply captured mid-day role moves from Jo's DM (temporarily — "
+                 "was #client-support-leads). Splits each day using moves ≥ 30 min.",
         )
 
     # Load or initialise week data

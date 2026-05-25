@@ -1,8 +1,9 @@
 """
 Mid-day role-change capture.
 
-When a TL types `Maisha to triage` in #client-support-leads (threaded
-under the daily anchor), the role_change_daemon captures it as a
+When a TL types `Maisha to triage` in Jo's DM (threaded under the daily
+anchor — temporary while testing; eventually back to #client-support-leads),
+the role_change_daemon captures it as a
 structured move record. This module holds:
 
   - the Slack-message parser (parse_role_change_message)
