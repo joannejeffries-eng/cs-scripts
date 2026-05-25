@@ -4,7 +4,8 @@ Role-change daemon — captures TL-posted mid-day role moves from Slack.
 How it works
 ------------
 - Each working morning the daemon posts an *anchor* message in
-  #client-support-leads (C093EAUT3HQ):
+  Jo's DM (U07KFSSCUNT) — temporarily, while we work the kinks out.
+  Will move back to #client-support-leads (C093EAUT3HQ) once stable.
 
       📋 Role changes for Mon 26 May — please post any moves in this thread.
       Format: `Maisha to triage` or `Maisha to triage 10:30-12` or `Maisha back`
@@ -43,7 +44,7 @@ import role_changes as rc
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
-ROLE_CHANGES_CHANNEL = 'C093EAUT3HQ'   # #client-support-leads
+ROLE_CHANGES_CHANNEL = 'U07KFSSCUNT'   # Jo's DM (temporary — was #client-support-leads C093EAUT3HQ)
 POLL_INTERVAL_SECONDS = 30
 
 STATE_DIR = Path.home() / '.claude/scheduled-tasks/role-changes'
