@@ -4,8 +4,9 @@ Role-change daemon — captures TL-posted mid-day role moves from Slack.
 How it works
 ------------
 - Each working morning the daemon posts an *anchor* message in
-  Jo's DM (U07KFSSCUNT) — temporarily, while we work the kinks out.
-  Will move back to #client-support-leads (C093EAUT3HQ) once stable.
+  #dry-run-testing-jo (C0AUP24HQPP) — temporarily, while we work the
+  kinks out. Will move back to #client-support-leads (C093EAUT3HQ)
+  once stable.
 
       📋 Role changes for Mon 26 May — please post any moves in this thread.
       Format: `Maisha to triage` or `Maisha to triage 10:30-12` or `Maisha back`
@@ -44,7 +45,7 @@ import role_changes as rc
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
-ROLE_CHANGES_CHANNEL = 'U07KFSSCUNT'   # Jo's DM (temporary — was #client-support-leads C093EAUT3HQ)
+ROLE_CHANGES_CHANNEL = 'C0AUP24HQPP'   # #dry-run-testing-jo (temporary — was #client-support-leads C093EAUT3HQ)
 
 # Resolved channel ID (D... for a DM, or the channel ID for a channel).
 # Filled lazily by _resolved_channel() at first use because:
