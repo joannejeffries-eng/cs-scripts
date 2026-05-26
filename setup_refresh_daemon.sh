@@ -1,12 +1,13 @@
 #!/bin/bash
 # One-time setup for the CS launchd agents.
 #
-# Three agents get installed:
+# Four agents get installed:
 #   1. com.juno.cs-refresh-daemon       — pulls Looker actuals on demand (Slack-triggered)
 #   2. com.juno.cs-role-change-daemon   — captures TL-posted role moves (Slack-triggered)
 #   3. com.juno.cs-daily-actuals        — weekday auto-pull at 4 points per day
+#   4. com.juno.cs-rota-app             — Streamlit rota app on http://localhost:8501
 #
-# Long-running daemons (1, 2) auto-start at every login and restart on crash.
+# Long-running services (1, 2, 4) auto-start at every login and restart on crash.
 # The auto-pull (3) fires Mon–Fri at 06:00, 11:00, 13:30 and 15:30
 # (catches up on wake if missed).
 #
@@ -35,11 +36,13 @@ DAEMONS=(
   "com.juno.cs-refresh-daemon"
   "com.juno.cs-role-change-daemon"
   "com.juno.cs-daily-actuals"
+  "com.juno.cs-rota-app"
 )
 
 LOG_DIRS=(
   "$HOME/.claude/scheduled-tasks/refresh-daemon"
   "$HOME/.claude/scheduled-tasks/role-changes"
+  "$HOME/.claude/scheduled-tasks/rota-app"
 )
 
 # ── 1. Save Postgres URL to a file the refresh daemon can read ────────────
@@ -108,6 +111,8 @@ done
 
 echo ""
 echo "Test them:"
+echo "  • Rota app:      open http://localhost:8501 in your browser"
+echo "                   (auto-starts on login, restarts on crash)"
 echo "  • Refresh:       post '🔄 refresh' in #dry-run-testing-jo"
 echo "  • Role change:   post 'Maisha to triage' in #dry-run-testing-jo"
 echo "                   (under today's anchor message — daemon posts it on first weekday poll;"
