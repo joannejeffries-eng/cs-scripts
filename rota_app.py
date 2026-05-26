@@ -1592,9 +1592,12 @@ elif page == "🏆 Reward Time":
     with col_pick4:
         st.write("")
         autofill_clicked = st.button(
-            "🍯 Autofill from notes",
+            "🔃 Resync from notes",
             use_container_width=True,
-            help="Reads Daily Notes and splits days with a 'Reward time' or 'appointment' note into role + segment.",
+            help="Two-way sync with Daily Notes: reverts any autofilled splits "
+                 "whose entry has moved or disappeared, then applies any new "
+                 "reward-time / appointment notes. Manually applied splits are "
+                 "left alone.",
         )
     with col_pick5:
         st.write("")
@@ -1697,7 +1700,7 @@ elif page == "🏆 Reward Time":
                 st.error(f"Sync failed: {e}")
 
     if autofill_clicked:
-        with st.spinner("Reading Daily Notes and autofilling splits…"):
+        with st.spinner("Resyncing splits from Daily Notes…"):
             try:
                 gc = _cached_gspread()
                 # Reward week spans two rota weeks. Load Daily Notes from both
@@ -1712,45 +1715,52 @@ elif page == "🏆 Reward Time":
                         if target_date in reward_dates:
                             notes_by_date.setdefault(target_date, []).extend(entries)
 
-                # Order matters: reward time first (typically larger blocks),
-                # then appointments. If a day has both, the first one wins and
-                # the second is skipped as 'already has segment'.
-                reward_results = rt.autofill_reward_splits_from_notes(week_data, notes_by_date)
-                appt_results   = rt.autofill_appointment_splits_from_notes(week_data, notes_by_date)
+                # Two-way sync: reverts stale autofilled splits + applies new ones.
+                result = rt.resync_autofilled_splits_from_notes(week_data, notes_by_date)
+                reverted = result['reverted']
+                applied_results = result['applied']
 
                 total_applied = (
-                    [('reward time', r) for r in reward_results if r['status'] == 'applied']
-                    + [('appointment',  r) for r in appt_results if r['status'] == 'applied']
+                    [('reward time', r) for r in applied_results
+                     if r['status'] == 'applied' and 'reward time' in r['reason']]
+                    + [('appointment', r) for r in applied_results
+                       if r['status'] == 'applied' and 'appointment' in r['reason']]
                 )
-                total_skipped = (
-                    [('reward time', r) for r in reward_results if r['status'] == 'skipped']
-                    + [('appointment',  r) for r in appt_results if r['status'] == 'skipped']
-                )
+                total_skipped = [r for r in applied_results if r['status'] == 'skipped']
 
-                if total_applied:
+                # Save if anything changed
+                if reverted or total_applied:
                     save_week(reward_friday, week_data)
                     st.session_state[rw_key] = week_data
-                    st.success(f"Autofilled {len(total_applied)} split(s):")
+
+                if reverted:
+                    st.warning(f"↩️ Reverted {len(reverted)} stale autofilled split(s):")
+                    for r in reverted:
+                        st.caption(f"  • {r['name']} {r['date'].strftime('%a %d/%m')} — {r['reason']}")
+
+                if total_applied:
+                    st.success(f"🍯 Applied {len(total_applied)} split(s):")
                     for kind, r in total_applied:
                         st.caption(
                             f"  • {r['name']} {r['date'].strftime('%a %d/%m')} ({kind}): {r['reason']}"
                         )
-                else:
-                    st.info("Nothing to autofill — no new reward-time or appointment notes.")
+
+                if not reverted and not total_applied:
+                    st.info("Nothing to sync — Daily Notes already match the state.")
 
                 if total_skipped:
                     with st.expander(f"⏭️ {len(total_skipped)} skipped"):
-                        for kind, r in total_skipped:
+                        for r in total_skipped:
                             hrs = f"{r['hours']:.2f}h" if r['hours'] is not None else "—"
                             st.caption(
                                 f"  • {r['name']} {r['date'].strftime('%a %d/%m')} "
-                                f"({kind}, {hrs}): {r['reason']}"
+                                f"({hrs}): {r['reason']}"
                             )
 
-                if total_applied:
+                if reverted or total_applied:
                     st.rerun()
             except Exception as e:
-                st.error(f"Autofill failed: {e}")
+                st.error(f"Resync failed: {e}")
 
     if apply_moves_clicked:
         import role_changes as _rc

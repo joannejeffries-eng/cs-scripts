@@ -956,6 +956,133 @@ def autofill_appointment_splits_from_notes(week_data, notes_by_date):
     )
 
 
+def resync_autofilled_splits_from_notes(week_data, notes_by_date):
+    """Two-way sync: revert stale autofilled splits + apply current ones.
+
+    Use case: a user moves a 'Reward time' entry in Daily Notes from
+    Tuesday to Thursday. Without this function:
+      - the Tuesday split stays in state (preserved by sync_rota_into_week)
+      - the Thursday split gets added on the next autofill
+      - the person ends up with TWO splits, one stale
+
+    With this function:
+      - the Tuesday split is detected as 'autofilled but Daily Notes no
+        longer agrees' and reverted via unsplit_day back to the rota role
+      - autofill then runs as normal and applies the Thursday split
+
+    Splits applied manually via the UI are NOT touched — only overrides
+    whose reason starts with 'Autofilled from Daily Notes' are eligible
+    for revert. The override's reason is annotated with '[reverted — …]'
+    so a later resync doesn't try to revert it again.
+
+    Args:
+        week_data: {name: PersonWeek}
+        notes_by_date: {date: [entry_dict]} where entry has 'name',
+            'time', 'note' — same shape autofill_*_from_notes expects.
+
+    Returns:
+        {
+          'reverted': [{'name', 'date', 'reason'}, ...],
+          'applied':  [{'name', 'date', 'hours', 'status', 'reason'}, ...]
+                       — same shape autofill_*_from_notes returns,
+                       covering both reward-time and appointment runs
+        }
+    """
+    import re
+    from datetime import datetime, date as _date
+
+    reverted = []
+
+    # Build (name, date) → list of lowercased note text for matching
+    notes_index: dict = {}
+    for d, entries in notes_by_date.items():
+        for e in entries:
+            n = (e.get('name') or '').strip()
+            note_text = (e.get('note') or '').strip().lower()
+            notes_index.setdefault((n, d), []).append(note_text)
+
+    fallback_year = (next(iter(notes_by_date.keys())).year
+                     if notes_by_date else _date.today().year)
+
+    field_re = re.compile(r'^split\s+\(\w+\s+(\d{1,2})/(\d{1,2})\)$')
+
+    for name, pw in week_data.items():
+        for ov in pw.overrides:
+            reason = ov.get('reason') or ''
+            if not reason.startswith('Autofilled from Daily Notes:'):
+                continue
+            if '[reverted' in reason:
+                continue   # already reverted in a previous resync
+
+            field = (ov.get('field') or '').strip()
+            m = field_re.match(field)
+            if not m:
+                continue
+            dd, mm = int(m.group(1)), int(m.group(2))
+            try:
+                d = _date(fallback_year, mm, dd)
+            except ValueError:
+                continue
+
+            # What kind of autofill was this?
+            lower = reason.lower()
+            if 'reward time' in lower:
+                keyword = 'reward time'
+            elif 'appointment' in lower or 'appt' in lower:
+                keyword = 'appointment'
+            else:
+                continue   # unknown — leave alone
+
+            dr = pw.days.get(d)
+            if not dr or not dr.segments:
+                continue   # split already gone
+
+            # Does Daily Notes still have a matching entry?
+            # For appointment matching we accept either 'appointment' or 'appt'.
+            day_notes = notes_index.get((name, d), [])
+            if keyword == 'reward time':
+                still_present = any('reward time' in n for n in day_notes)
+            else:
+                still_present = any(('appointment' in n) or ('appt' in n)
+                                    for n in day_notes)
+            if still_present:
+                continue
+
+            # Revert. Find the "main" non-suffix role from the segments.
+            main_role = None
+            suffix_prefixes = (
+                'Reward time', 'Appointment', 'Part day AL', 'Training',
+            )
+            for seg in dr.segments:
+                if not seg.role.startswith(suffix_prefixes):
+                    main_role = seg.role
+                    break
+            if not main_role:
+                continue   # safety: can't determine main role
+
+            unsplit_day(pw, d, main_role)
+            ov['reverted_at'] = datetime.now().isoformat()
+            ov['reason'] = (reason
+                            + ' [reverted — Daily Notes no longer has '
+                              'a matching entry on this day]')
+
+            reverted.append({
+                'name': name,
+                'date': d,
+                'reason': f"Daily Notes no longer has a {keyword} "
+                          f"entry on {d.strftime('%a %d/%m')}",
+            })
+
+    # Now apply current Daily Notes (idempotent — only adds missing splits)
+    reward_results = autofill_reward_splits_from_notes(week_data, notes_by_date)
+    appt_results = autofill_appointment_splits_from_notes(week_data, notes_by_date)
+
+    return {
+        'reverted': reverted,
+        'applied': reward_results + appt_results,
+    }
+
+
 def _role_needs_cover(role: str) -> bool:
     """Cover is only required for Inbound phones or Triage + lender chasing.
 
