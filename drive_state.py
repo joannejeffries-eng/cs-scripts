@@ -137,12 +137,31 @@ def read_json_either(local_path: Path, drive_filename: str):
 
 
 def write_json_either(local_path: Path, drive_filename: str, data) -> None:
-    """Write JSON to Drive when on cloud; to local_path otherwise."""
+    """Write JSON to both local FS and Drive when running locally;
+    Drive only when on cloud (no useful local FS — it's ephemeral).
+
+    The dual-write matters because the *cloud* rota app can only see
+    state that's been pushed to Drive. The role-change daemon and the
+    local Streamlit app both run on Jo's Mac, but their state has to
+    reach the cloud somehow — and Drive is the bus we use.
+
+    Drive write failures don't fail the call — the local copy stays
+    correct for the local app. The cloud-side reader will see stale
+    state until the next successful sync.
+    """
     if running_on_cloud():
         drive_write_json(drive_filename, data)
         return
+    # Local: write to both. Local first so the local app is never blocked
+    # on a Drive hiccup.
     local_path.parent.mkdir(parents=True, exist_ok=True)
     local_path.write_text(json.dumps(data, indent=2))
+    try:
+        drive_write_json(drive_filename, data)
+    except Exception as e:
+        import logging
+        logging.warning(f"Drive write failed for {drive_filename}: {e}. "
+                         f"Local copy is fine; cloud will be stale.")
 
 
 def list_files_either(local_dir: Path, drive_prefix: str) -> list[str]:
