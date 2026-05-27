@@ -61,6 +61,16 @@ ROLE_ALIASES = {
     'triage lc':         'Triage + lender chasing',
     'triage+lc':         'Triage + lender chasing',
     'triage and lc':     'Triage + lender chasing',
+    'tvc':               'Triage and Video Calls',
+    't+vc':              'Triage and Video Calls',
+    'vc':                'Triage and Video Calls',
+    'video':             'Triage and Video Calls',
+    'video calls':       'Triage and Video Calls',
+    'triage vc':         'Triage and Video Calls',
+    'triage + vc':       'Triage and Video Calls',
+    'triage video':      'Triage and Video Calls',
+    'triage and video':  'Triage and Video Calls',
+    'triage and video calls': 'Triage and Video Calls',
     'webchat':           'Inbound phones',   # webchat sits under phones role
     # Non-role states — part-day training / leave run from Slack too.
     # All have 0/0 targets in ROLE_TARGETS, so the moved-to portion of the
