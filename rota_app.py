@@ -1620,10 +1620,12 @@ elif page == "🏆 Reward Time":
         checks_clicked = st.button(
             "🔍 Run checks",
             use_container_width=True,
-            help="Auto-suggest Quality + Timeline per person: archive ratio on "
-                 "triage days, and work-activity gaps over 13 min (excluding "
-                 "standups/lunch); a block ≥30 min flags Timeline for review. "
-                 "Pre-fills the tick boxes — you can still override any of them.",
+            help="Auto-suggest Quality + Timeline per person. Quality = triage "
+                 "archive ratio ≥85% AND Cody edits fed back in "
+                 "#cody-email-triage-feedback. Timeline = work-activity gaps "
+                 "over 13 min (excluding standups/lunch/1:1s); a block ≥30 min "
+                 "flags for review. Pre-fills the tick boxes — you can still "
+                 "override any. Takes ~30s (pulls activity + Cody).",
         )
 
     # Load or initialise week data
