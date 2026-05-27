@@ -62,7 +62,8 @@ LOG_FILE = STATE_DIR / 'daemon.log'
 
 ANCHOR_HEADER = "📋 Role changes for {day_label} — please post any moves in this thread."
 ANCHOR_HELP = ("Format: `Maisha to triage` or `Maisha to triage 10:30-12` "
-                "or `Maisha back`")
+                "or `Maisha back`. Post `clear all` to wipe today's moves "
+                "and start over.")
 
 
 # ── Slack helpers ───────────────────────────────────────────────────────────
@@ -282,6 +283,27 @@ def poll_once(today: date, last_seen: str, anchor_ts: str) -> str:
                 f"Try `Name to role` or `Name back`. "
                 f"Roles: phones, triage, ics, chasing, t+lc."
             )
+            last_seen = ts
+            _write_last_seen(last_seen)
+            continue
+
+        # "clear all" / "reset" — wipe today's captured moves.
+        if parsed.get('action') == 'reset':
+            try:
+                existing = rc.load_moves(today)
+                rc.save_moves(today, [])
+                _react(channel, ts, 'white_check_mark')
+                _thread_reply(
+                    channel, anchor_ts,
+                    f"🧹 Cleared {len(existing)} move(s) for today. "
+                    f"Starting fresh — post new moves as `Name to role`."
+                )
+                logging.info(f"reset: cleared {len(existing)} moves for {today}")
+            except Exception as e:
+                logging.exception("reset failed")
+                _react(channel, ts, 'x')
+                _thread_reply(channel, anchor_ts,
+                               f"❌ Couldn't clear today's moves: {e}")
             last_seen = ts
             _write_last_seen(last_seen)
             continue
