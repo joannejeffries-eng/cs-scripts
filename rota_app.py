@@ -167,8 +167,9 @@ def _cached_working_hours():
 
 
 CORE_PHONES = ['Becky', 'Elida', 'Fionn', 'Jade', 'Kate']
-WIDER_TEAM = ['Bella', 'Clare', 'Cris', 'Erika', 'Harriet',
-              'Kirsty', 'Lizzie', 'Lucy', 'Maisha', 'Noemi', 'Sophie', 'Tara', 'Thea']
+WIDER_TEAM = ['Clare', 'Cris', 'Erika', 'Harriet', 'Harry',
+              'Kirsty', 'Lizzie', 'Lucy', 'Maisha', 'Noemi', 'Roseanne',
+              'Sophie', 'Tara', 'Thea']
 
 
 # ── Slack ──────────────────────────────────────────────────────────────────
@@ -334,9 +335,10 @@ def send_slack_message(channel, text, link_names=False):
 # ── Slack user resolution (for DMing cover team) ───────────────────────────
 # Short-name → "First Last" for everyone we might DM
 FULL_NAMES = {
-    'Becky': 'Becky Smith', 'Bella': 'Bella Brayford', 'Clare': 'Clare Brown',
+    'Becky': 'Becky Smith', 'Clare': 'Clare Brown',
     'Cris': 'Cris Macagi', 'Elida': 'Elida Gizli', 'Erika': 'Erika Frolova',
     'Fionn': 'Fionn Burrows', 'Harriet': 'Harriet Clifton-Sprigg',
+    'Harry': 'Harry McNicholas', 'Roseanne': 'Roseanne Brooks-Brown',
     'Jade': 'Jade Regent', 'Kate': "Kate O'Neill", 'Kirsty': 'Kirsty Rowley',
     'Lizzie': 'Lizzie Williamson', 'Lucy': 'Lucy Riordan',
     'Maisha': 'Maisha Begum', 'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
@@ -443,7 +445,6 @@ TL_PEGASUS_CHANNELS = {
 # conversations.list on 2026-05-20.
 PEGASUS_CHANNELS = {
     'Becky':    'C05FK5N5JR3',   # #pegasus-becky-c
-    'Bella':    'C0907STFMNY',   # #pegasus-bella-j
     'Clare':    'C09728A769E',   # #pegasus-clare-j
     'Cris':     'C0925KLHDFD',   # #pegasus-cris-j
     'Elida':    'C0APEK7FFU0',   # #pegasus-elida-c
@@ -468,7 +469,7 @@ PEGASUS_CHANNELS = {
 
 # Pretty labels for display (match the actual workspace channel names).
 PEGASUS_LABELS = {
-    'Becky': '#pegasus-becky-c',  'Bella': '#pegasus-bella-j',
+    'Becky': '#pegasus-becky-c',
     'Clare': '#pegasus-clare-j',  'Cris': '#pegasus-cris-j',
     'Elida': '#pegasus-elida-c',  'Erika': '#pegasus-erika-l',
     'Fionn': '#pegasus-fionn-c',  'Harriet': '#pegasus-harriet-l',

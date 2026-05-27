@@ -25,7 +25,9 @@ DB_URL = os.environ['STAFF_APP_LOOKER_POSTGRES_URL']
 
 # Tracker agents (in order they appear in the spreadsheet)
 CORE_PHONES = ['Becky', 'Elida', 'Fionn', 'Jade', 'Kate']
-WIDER_TEAM = ['Bella', 'Charne', 'Clare', 'Cris', 'Erika', 'Harriet',
+# Harry (Courtney) & Roseanne (Yasmin) join the reward tracker once they finish
+# training and enter the reward scheme — they're in the rota now but not assessed yet.
+WIDER_TEAM = ['Charne', 'Clare', 'Cris', 'Erika', 'Harriet',
               'Kirsty', 'Lizzie', 'Lucy', 'Maisha', 'Noemi', 'Sophie', 'Tara', 'Thea']
 ALL_AGENTS = CORE_PHONES + WIDER_TEAM
 
@@ -37,7 +39,6 @@ DB_NAMES = {
     'Jade': 'Jade Regent',
     'Kate': "Kate O'Neill",
     'Kirsty': 'Kirsty Rowley',
-    'Bella': 'Bella Brayford',
     'Charne': 'Charne Wilson',
     'Clare': 'Clare Brown',
     'Cris': 'Cris Macagi',
@@ -1059,7 +1060,7 @@ def generate_and_fill(friday, roles, phone_data, things_data, skips_data,
         else:
             wh_after = working_hours
 
-        # Individual target overrides (Bella's 98 etc.)
+        # Individual target overrides (from the Overrides tab)
         if overrides and overrides.get('individual'):
             applied_ind = apply_individual_overrides(
                 ws, agent_rows, roles, dates, wh_after, overrides['individual'])
