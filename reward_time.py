@@ -1371,31 +1371,76 @@ SPLITTABLE_ROLES = [
 ]
 
 
+# Segment roles that come from Daily Notes (reward time / appointments /
+# part-day leave / training), NOT from role moves. apply_moves_to_day must
+# preserve these when it re-derives a day from the move list.
+_PROTECTED_SEGMENT_PREFIXES = ('Reward time', 'Appointment', 'Part day AL', 'Training')
+
+
 def apply_moves_to_day(pw, target_date, moves, *, noise_floor_min=30):
-    """Apply captured role-change moves to a person's day as split segments.
+    """Re-derive a person's day from the *current* captured role moves.
 
-    Reads the day's `pw.days[target_date]` and the captured `moves` list
-    (typically from role_changes.load_moves(target_date)). For each move
-    on this person ≥ `noise_floor_min`:
+    Idempotent: each call rebuilds the day from scratch — the planned rota
+    role for the working portion, plus a segment for each moved-to role,
+    plus any protected segments (reward time / appointment / part-day leave
+    / training) carried over from Daily Notes. This means clearing the moves
+    in Slack and re-applying always reflects exactly the current move list,
+    with no stale leftovers — no separate 'Sync rota' step needed.
+
+    For each move on this person ≥ `noise_floor_min`:
         - Aggregates total time on each moved-to role
-        - Builds segments_spec covering: remaining time on the rota role
-          + total time on each moved role
-        - Calls existing split_day() to apply
+        - Rebuilds segments: rota remainder + moved roles + protected
+        - Calls split_day() (which overwrites segments wholesale)
 
-    Skips:
-      - days that already have segments (don't clobber TL manual splits)
-      - days that aren't working (absences)
-      - moves with no start/end times (open moves)
-      - moves shorter than noise_floor_min
+    Behaviour:
+      - No segments + moves        → split fresh
+      - Prior apply-moves split    → re-derived from the new move list
+      - Reward/appt-only split     → moves layered on, reward/appt preserved
+      - No moves + prior apply      → collapses back to planned rota (+protected)
+      - Manual TL split (non-protected segments, no apply-moves override)
+                                   → left untouched
+
+    Skips: non-working days, moves with no start/end window, moves shorter
+    than noise_floor_min.
 
     Returns {'applied': bool, 'reason': str, 'segments': [(role, hours), …]}.
     """
     dr = pw.days.get(target_date)
     if not dr or not dr.is_working:
         return {'applied': False, 'reason': 'not working', 'segments': []}
-    if dr.segments:
-        return {'applied': False, 'reason': 'already split', 'segments': []}
 
+    day_tag = target_date.strftime('%a %d/%m')
+    had_prior_apply = any(
+        (o.get('field') or '').startswith(f'apply_moves ({day_tag})')
+        for o in pw.overrides
+    )
+
+    # Split the current segments into protected (Daily-Notes-derived) and
+    # move-derived (everything else).
+    protected_segs = [(s.role, s.minutes / 60.0)
+                      for s in dr.segments
+                      if s.role.startswith(_PROTECTED_SEGMENT_PREFIXES)]
+    protected_hours = sum(h for _, h in protected_segs)
+    non_protected = [s for s in dr.segments
+                     if not s.role.startswith(_PROTECTED_SEGMENT_PREFIXES)]
+
+    # Guard: a multi-segment non-protected split that we didn't create is a
+    # manual TL split — leave it alone.
+    if len(non_protected) > 1 and not had_prior_apply:
+        return {'applied': False, 'reason': 'manually split — left alone',
+                'segments': []}
+
+    # The planned rota role for the working portion. If the day is currently
+    # split, the (single) non-protected segment carries it; else dr.role —
+    # but dr.role may be a synthetic 'A / B' label, so take its head.
+    if non_protected:
+        rota_role = non_protected[0].role
+    else:
+        rota_role = dr.role.split(' / ')[0] if ' / ' in dr.role else dr.role
+
+    old_label = dr.role
+
+    # Gather this person's qualifying moves.
     person_moves = []
     for m in moves:
         if m.get('name') != pw.name:
@@ -1414,36 +1459,55 @@ def apply_moves_to_day(pw, target_date, moves, *, noise_floor_min=30):
         dur_min = (eh * 60 + em) - (sh * 60 + sm)
         if dur_min < noise_floor_min:
             continue
-        person_moves.append({
-            'to_role': m.get('to_role'),
-            'duration_min': dur_min,
-        })
+        person_moves.append({'to_role': m.get('to_role'), 'duration_min': dur_min})
 
+    # No qualifying moves now.
     if not person_moves:
-        return {'applied': False, 'reason': 'no qualifying moves',
-                'segments': []}
+        if had_prior_apply and dr.segments:
+            # A previous apply split this day but the moves are gone — collapse
+            # back to the planned rota (keeping any protected segments).
+            if protected_segs:
+                rota_hours = round(dr.shift_hours - protected_hours, 2)
+                spec = [(rota_role, rota_hours)] + \
+                       [(r, round(h, 2)) for r, h in protected_segs]
+                split_day(pw, target_date, spec)
+            else:
+                unsplit_day(pw, target_date, rota_role)
+            add_override(pw, f'apply_moves ({day_tag})', old_label, dr.role,
+                          'Re-derived from moves: none now — reset to planned rota')
+            return {'applied': True, 'reason': 'reset to planned rota (no moves)',
+                    'segments': []}
+        return {'applied': False, 'reason': 'no qualifying moves', 'segments': []}
 
-    # Aggregate hours by destination role (multiple short moves to same role merge)
+    # Aggregate moved hours by destination role.
     by_role = {}
     for m in person_moves:
         r = m['to_role']
         by_role[r] = by_role.get(r, 0.0) + (m['duration_min'] / 60.0)
 
     moved_hours = sum(by_role.values())
-    rota_hours = max(0.0, dr.shift_hours - moved_hours)
-    rota_role = dr.role
+    rota_hours = round(dr.shift_hours - protected_hours - moved_hours, 2)
 
-    if rota_hours < 0.5:
+    if rota_hours < 0.5 and not protected_segs:
         return {
             'applied': False,
             'reason': f'whole-day move ({rota_role} → {list(by_role)[0]}) — '
                        f'consider updating the rota instead',
             'segments': [],
         }
+    if rota_hours < 0:
+        rota_hours = 0.0  # moves + protected exceed the shift; clamp
 
-    segments_spec = [(rota_role, round(rota_hours, 2))]
+    segments_spec = []
+    if rota_hours >= 0.25:
+        segments_spec.append((rota_role, rota_hours))
     for role, hrs in by_role.items():
         segments_spec.append((role, round(hrs, 2)))
+    for role, hrs in protected_segs:
+        segments_spec.append((role, round(hrs, 2)))
+
+    if len(segments_spec) < 2:
+        return {'applied': False, 'reason': 'nothing to split', 'segments': []}
 
     ok = split_day(pw, target_date, segments_spec)
     if not ok:
@@ -1451,9 +1515,9 @@ def apply_moves_to_day(pw, target_date, moves, *, noise_floor_min=30):
                 'segments': []}
 
     add_override(
-        pw, f'apply_moves ({target_date.strftime("%a %d/%m")})',
-        rota_role, dr.role,
-        'Auto-split from role-change moves: '
+        pw, f'apply_moves ({day_tag})',
+        old_label, dr.role,
+        'Re-derived from role-change moves: '
         + ', '.join(f"{r} {h:.1f}h" for r, h in segments_spec),
     )
     return {'applied': True, 'reason': 'split applied',

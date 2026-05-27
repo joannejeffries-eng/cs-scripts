@@ -1774,14 +1774,13 @@ elif page == "🏆 Reward Time":
         with st.spinner("Reading captured moves and applying splits…"):
             try:
                 applied_summary = []
+                reset_summary = []
                 skipped_summary = []
                 noise_skipped = 0
                 for d in reward_dates:
                     moves = _rc.load_moves(d)
-                    if not moves:
-                        continue
                     # Pre-count moves below noise floor for summary
-                    for m in moves:
+                    for m in (moves or []):
                         if m.get('action') in (None, 'move'):
                             try:
                                 sh, sm = (int(p) for p in m.get('start_time', '0:0').split(':'))
@@ -1791,28 +1790,51 @@ elif page == "🏆 Reward Time":
                                     noise_skipped += 1
                             except Exception:
                                 pass
-                    # Run per person who has a move on this day
-                    names_with_moves = sorted({m.get('name') for m in moves if m.get('name')})
-                    for name in names_with_moves:
+                    # Process everyone who has a move on this day OR was
+                    # previously split by Apply moves (so clearing the moves
+                    # collapses those days back to the planned rota).
+                    day_tag = d.strftime('%a %d/%m')
+                    names_with_moves = {m.get('name') for m in (moves or []) if m.get('name')}
+                    names_prev_applied = {
+                        name for name, pw in week_data.items()
+                        if any((o.get('field') or '').startswith(f'apply_moves ({day_tag})')
+                               for o in pw.overrides)
+                    }
+                    for name in sorted(names_with_moves | names_prev_applied):
                         pw = week_data.get(name)
                         if not pw:
                             continue
-                        result = rt.apply_moves_to_day(pw, d, moves)
-                        label = f"{name} {d.strftime('%a %d/%m')}"
+                        result = rt.apply_moves_to_day(pw, d, moves or [])
+                        label = f"{name} {day_tag}"
                         if result['applied']:
-                            segs = ', '.join(f"{r} {h:.1f}h" for r, h in result['segments'])
-                            applied_summary.append((label, segs))
-                        else:
+                            if result['segments']:
+                                segs = ', '.join(f"{r} {h:.1f}h" for r, h in result['segments'])
+                                applied_summary.append((label, segs))
+                            else:
+                                reset_summary.append((label, result['reason']))
+                        elif result['reason'] not in ('no qualifying moves',):
                             skipped_summary.append((label, result['reason']))
-                if applied_summary:
+                changed = bool(applied_summary or reset_summary)
+                if changed:
                     save_week(reward_friday, week_data)
                     st.session_state[rw_key] = week_data
+
+                if applied_summary:
                     st.success(f"Applied {len(applied_summary)} split(s) from captured moves.")
                     with st.expander(f"✏️ {len(applied_summary)} day(s) split"):
                         for lbl, segs in applied_summary:
                             st.caption(f"  • {lbl}: {segs}")
-                else:
-                    st.info("No moves to apply (no qualifying moves found or all days already split).")
+
+                if reset_summary:
+                    st.warning(f"↩️ Reset {len(reset_summary)} day(s) back to the planned "
+                               f"rota (moves cleared):")
+                    for lbl, reason in reset_summary:
+                        st.caption(f"  • {lbl}")
+
+                if not changed:
+                    st.info("No changes — captured moves already match the state "
+                            "(or none to apply).")
+
                 if skipped_summary or noise_skipped:
                     parts = []
                     if skipped_summary:
@@ -1822,7 +1844,8 @@ elif page == "🏆 Reward Time":
                     with st.expander("⏭️ " + ' · '.join(parts)):
                         for lbl, reason in skipped_summary:
                             st.caption(f"  • {lbl}: {reason}")
-                if applied_summary:
+
+                if changed:
                     st.rerun()
             except Exception as e:
                 st.error(f"Apply moves failed: {e}")
