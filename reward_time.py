@@ -26,27 +26,29 @@ FULL_TIME_HOURS = 40  # Weekly hours for full-time
 DB_NAMES = {
     'Becky': 'Becky Smith', 'Elida': 'Elida Gizli', 'Fionn': 'Fionn Burrows',
     'Jade': 'Jade Regent', 'Kate': "Kate O'Neill", 'Kirsty': 'Kirsty Rowley',
-    'Bella': 'Bella Brayford', 'Clare': 'Clare Brown', 'Cris': 'Cris Macagi',
+    'Clare': 'Clare Brown', 'Cris': 'Cris Macagi',
     'Erika': 'Erika Frolova', 'Harriet': 'Harriet Clifton-Sprigg',
     'Lizzie': 'Lizzie Williamson', 'Lucy': 'Lucy Riordan',
     'Maisha': 'Maisha Begum', 'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
     'Tara': 'Tara Dunkley', 'Thea': 'Thea Willsmore',
+    'Harry': 'Harry McNicholas', 'Roseanne': 'Roseanne Brooks-Brown',
 }
 FIRST_NAMES = {v: k for k, v in DB_NAMES.items()}
 
 TL_TEAMS = {
-    'Courtney': ['Fionn', 'Kate', 'Becky', 'Jade', 'Elida', 'Harriet'],
-    'Yasmin': ['Tara', 'Sophie', 'Noemi', 'Lizzie', 'Kirsty'],
-    'Jess': ['Bella', 'Cris', 'Clare', 'Erika', 'Lucy', 'Maisha', 'Thea'],
+    'Courtney': ['Fionn', 'Kate', 'Becky', 'Jade', 'Elida', 'Harriet', 'Harry'],
+    'Yasmin': ['Tara', 'Sophie', 'Noemi', 'Lizzie', 'Kirsty', 'Roseanne'],
+    'Jess': ['Cris', 'Clare', 'Erika', 'Lucy', 'Maisha', 'Thea'],
 }
 ALL_AGENTS = sorted(DB_NAMES.keys())
 
 # ── Weekly hours per person (for pro-rata) ──────────────────────────────────
 WEEKLY_HOURS = {
     'Becky': 40, 'Kate': 40, 'Fionn': 40, 'Jade': 40, 'Elida': 40,
-    'Harriet': 40, 'Bella': 35, 'Cris': 40, 'Clare': 32, 'Erika': 40,
+    'Harriet': 40, 'Cris': 40, 'Clare': 32, 'Erika': 40,
     'Lucy': 40, 'Maisha': 40, 'Thea': 40, 'Noemi': 40, 'Tara': 22,
     'Sophie': 30, 'Kirsty': 40, 'Lizzie': 30,
+    'Harry': 40, 'Roseanne': 40,
 }
 
 # ── Targets ─────────────────────────────────────────────────────────────────
@@ -126,25 +128,28 @@ STRETCH_BONUS_HOURS = 1.0
 # ── Reward day assignments ──────────────────────────────────────────────────
 # {name: (day_name, block)} — day_name is 'Tue','Wed','Thu'; block is 'AM' or 'PM'
 REWARD_DAYS = {
-    'Jade':    ('Tue', 'AM'),
-    'Maisha':  ('Tue', 'AM'),
-    'Becky':   ('Tue', 'PM'),
-    'Lucy':    ('Tue', 'PM'),
-    'Thea':    ('Tue', 'PM'),
-    'Kate':    ('Wed', 'AM'),
-    'Noemi':   ('Wed', 'AM'),
-    'Cris':    ('Wed', 'AM'),
-    'Fionn':   ('Wed', 'PM'),
-    'Lizzie':  ('Wed', 'PM'),
-    'Clare':   ('Wed', 'PM'),
-    'Kirsty':  ('Thu', 'AM'),
-    'Sophie':  ('Thu', 'AM'),
-    'Tara':    ('Thu', 'AM'),
-    'Elida':   ('Thu', 'PM'),
-    'Erika':   ('Thu', 'PM'),
-    'Bella':   ('Thu', 'PM'),
+    'Jade':     ('Tue', 'AM'),
+    'Maisha':   ('Tue', 'AM'),
+    'Becky':    ('Tue', 'PM'),
+    'Lucy':     ('Tue', 'PM'),
+    'Thea':     ('Tue', 'PM'),
+    'Sophie':   ('Tue', 'PM'),
+    'Kate':     ('Wed', 'AM'),
+    'Noemi':    ('Wed', 'AM'),
+    'Cris':     ('Wed', 'AM'),
+    'Fionn':    ('Wed', 'PM'),
+    'Lizzie':   ('Wed', 'PM'),
+    'Clare':    ('Wed', 'PM'),
+    'Kirsty':   ('Wed', 'PM'),
+    'Tara':     ('Thu', 'AM'),
+    'Harry':    ('Thu', 'AM'),
+    'Elida':    ('Thu', 'PM'),
+    'Erika':    ('Thu', 'PM'),
+    'Roseanne': ('Thu', 'PM'),
+    'Harriet':  ('Fri', 'PM'),
 }
-# Harriet not in the original doc — needs assigning
+# Harry starts 2026-06-01, Roseanne 2026-06-10 — blocks assigned now; they won't
+# appear in the weekly reward message until they have worked days (days_worked > 0).
 # Phones team: Jade, Becky, Kate, Fionn, Kirsty, Elida
 # Phones can only swap with phones
 
@@ -160,7 +165,8 @@ DAILY_HOURS = {
     'Becky': 8, 'Kate': 8, 'Fionn': 8, 'Jade': 8, 'Elida': 8,
     'Harriet': 8, 'Cris': 8, 'Clare': 8, 'Erika': 8, 'Lucy': 8,
     'Maisha': 8, 'Thea': 8, 'Noemi': 8, 'Kirsty': 8,
-    'Bella': 7, 'Tara': 4.5, 'Sophie': 6, 'Lizzie': 6,
+    'Tara': 4.5, 'Sophie': 6, 'Lizzie': 6,
+    'Harry': 8, 'Roseanne': 8,
 }
 
 
