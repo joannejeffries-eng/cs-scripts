@@ -60,6 +60,7 @@ ROLE_MAP = {
     'Inbound phones': 'Phones',
     'Triage only': 'Triage',
     'Triage + lender chasing': 'Triage + Chasing',
+    'Triage and Video Calls': 'Triage + Video Calls',
     'Case setup only': 'ICS',
     'Chasing': 'Call & Chase',
     'Team lead': 'Off',
@@ -111,7 +112,50 @@ STANDARD_TARGETS = {
     'Call & Chase':     {'baseline': 95,  'stretch': 120},
     'ICS':              {'baseline': 275, 'stretch': 305},
     'Triage + Chasing': {'baseline': 104, 'stretch': 144},
+    'Triage + Video Calls': {'baseline': 100, 'stretch': 140},
 }
+
+
+def _ensure_targets_rows(wb):
+    """Ensure the Targets tab has a row for every STANDARD_TARGETS role.
+
+    The tracker's per-role baseline/stretch cells are sheet formulas that
+    VLOOKUP Targets!$A:$C (full columns), so a role missing from the Targets
+    tab leaves its targets blank — and row position doesn't matter. We write
+    missing roles into a blank row (the template's gap) or append at the
+    bottom, and keep existing rows' values in sync. No row inserts (the
+    footnote row is merged, which insert_rows mangles). Idempotent.
+    """
+    from openpyxl.cell.cell import MergedCell
+    if 'Targets' not in wb.sheetnames:
+        return
+    ws = wb['Targets']
+
+    existing, empty_rows = {}, []
+    for r in range(2, ws.max_row + 1):
+        a = ws.cell(r, 1).value
+        if a is None or (isinstance(a, str) and not a.strip()):
+            empty_rows.append(r)
+            continue
+        if isinstance(a, str) and a.strip().lower().startswith('these are full-time'):
+            continue  # footnote
+        existing[str(a).strip()] = r
+
+    def _set(r, c, v):
+        cell = ws.cell(r, c)
+        if isinstance(cell, MergedCell):
+            return
+        cell.value = v
+
+    for role, t in STANDARD_TARGETS.items():
+        if role in existing:
+            _set(existing[role], 2, t['baseline'])
+            _set(existing[role], 3, t['stretch'])
+            continue
+        target_row = empty_rows.pop(0) if empty_rows else (ws.max_row + 1)
+        _set(target_row, 1, role)
+        _set(target_row, 2, t['baseline'])
+        _set(target_row, 3, t['stretch'])
 
 # Cell colours
 COLOUR_PRO_RATA = 'FFF2CC'   # Pale yellow
@@ -617,7 +661,9 @@ def compute_actual(agent, day_date, role, phone_data, things_data):
     if role == 'Call & Chase':
         return phone_data.get((agent, day_date, 'outbound'), 0)
 
-    if role == 'Triage':
+    if role in ('Triage', 'Triage + Video Calls'):
+        # Video calls add no separate countable metric — triage throughput
+        # is emails archived for both.
         if (agent, day_date) not in things_data:
             return None  # PDT data not yet available for this day
         methods = things_data[(agent, day_date)]
@@ -1079,6 +1125,10 @@ def generate_and_fill(friday, roles, phone_data, things_data, skips_data,
             report['pro_rata'], report['pro_rata_skipped'],
             report['individual'], report['standing'],
             daily_notes or [], (overrides or {}).get('keywords', DEFAULT_PRO_RATA_KEYWORDS))
+
+    # Keep the Targets tab in sync with STANDARD_TARGETS so the per-role
+    # baseline/stretch VLOOKUPs resolve (e.g. Triage + Video Calls).
+    _ensure_targets_rows(wb)
 
     wb.save(output_path)
     print(f"Saved: {output_path}")
