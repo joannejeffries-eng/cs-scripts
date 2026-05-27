@@ -8,7 +8,8 @@ Targets from the CS Baselines & Reward Time Plan doc.
 """
 import os
 import json
-from datetime import date, timedelta
+import logging
+from datetime import date, datetime, time as dtime, timedelta
 from pathlib import Path
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -205,6 +206,13 @@ class PersonWeek:
     skips: int = 0
     quality_ok: bool = False
     timeline_ok: bool = False
+    # Automated suggestions (set by run_quality_timeline_checks; Jo can override).
+    # *_suggested is None until checks have been run for this week.
+    quality_suggested: object = None      # bool | None
+    quality_reason: str = ''
+    timeline_suggested: object = None     # bool | None
+    timeline_reason: str = ''
+    timeline_gaps: list = field(default_factory=list)  # [{date, start, end, minutes}]
     overrides: list = field(default_factory=list)  # [{date, field, old, new, reason, timestamp}]
     override_eligible: str = ''  # '', 'base', 'stretch' — manual override of final eligibility
     weekly_hours: float = 40.0
@@ -421,6 +429,375 @@ def pull_skips(friday):
     return skips
 
 
+# ── Timeline gap analysis ───────────────────────────────────────────────────
+# Recurring meetings that legitimately interrupt work — excluded from gap
+# flagging. Keyed by weekday (Mon=0 … Fri=4); values are (start, end) as
+# "HH:MM". These mirror the gap_analysis Looker explore's intent: a gap that
+# falls inside one of these isn't an idle gap. Lunch + 1:1s are supplied
+# per-person by the caller (they vary by person/day).
+STANDUP_WINDOWS = {
+    1: [('09:00', '09:45')],   # Tuesday standups (two half-team slots 9:00/9:30)
+    2: [('17:00', '18:00')],   # Wednesday team meeting 5–6pm
+}
+
+# CS lunch-cover band — applied every weekday. A gap that sits inside this
+# window reads as lunch, not idle time. Wide on purpose: lunch start varies
+# per person and we'd rather not false-flag it.
+LUNCH_BAND = ('12:00', '14:00')
+
+# 1:1 slots from the CS TL sample diary (V6 May 2026). 1:1s are stacked 9am
+# starts on a 4-week rota; each person occupies a FIXED day+time slot whether
+# or not they have a 1:1 that particular week, so we exclude that window every
+# week (over-exclusion risk = one 1-hour window on one weekday — negligible).
+# (weekday Mon=0…Fri=4, start 'HH:MM', end 'HH:MM').
+ONE_TO_ONE_SLOTS = {
+    # Courtney's team — Wednesday
+    'Elida':   (2, '09:00', '10:00'), 'Jade': (2, '09:00', '10:00'),
+    'Harry':   (2, '09:00', '10:00'),
+    'Harriet': (2, '10:30', '11:30'), 'Becky': (2, '10:30', '11:30'),
+    'Fionn':   (2, '10:30', '11:30'), 'Kate':  (2, '10:30', '11:30'),
+    # Yasmin's team — Thursday
+    'Kirsty':  (3, '09:00', '10:00'), 'Noemi': (3, '09:00', '10:00'),
+    'Sophie':  (3, '09:00', '10:00'),
+    'Tara':    (3, '10:30', '11:30'), 'Roseanne': (3, '10:30', '11:30'),
+    'Lizzie':  (3, '10:30', '11:30'),
+    # Jess's team — Wednesday
+    'Lucy':    (2, '09:00', '10:00'), 'Erika': (2, '09:00', '10:00'),
+    'Cris':    (2, '10:30', '11:30'), 'Maisha': (2, '10:30', '11:30'),
+    'Clare':   (2, '10:30', '11:30'),
+}
+
+# A gap shorter than this (minutes) is normal task-switching — not even listed.
+# 13 min, not 10: 10–12 min gaps are routine and listing them flagged nearly
+# everyone, drowning out the meaningful ones.
+TIMELINE_GAP_THRESHOLD_MIN = 13
+# A single gap this long (minutes) is a substantial unexplained block and
+# trips the Timeline suggestion to REVIEW. Shorter gaps are still listed for
+# Jo to eyeball, but don't on their own flag the person.
+TIMELINE_REVIEW_GAP_MIN = 30
+
+
+def _to_local_naive(ts):
+    """Normalise a DB timestamp to naive UK-local time so it compares cleanly
+    with the naive standup/lunch windows. tz-aware → Europe/London → drop tz."""
+    if ts is None:
+        return None
+    if ts.tzinfo is None:
+        return ts
+    try:
+        from zoneinfo import ZoneInfo
+        return ts.astimezone(ZoneInfo('Europe/London')).replace(tzinfo=None)
+    except Exception:
+        # Fallback: treat as UTC and drop tz (rare — zoneinfo missing)
+        return ts.replace(tzinfo=None)
+
+
+def pull_activity_events(friday, include_history=False):
+    """Pull every timestamped work-activity event per person for the reward week.
+
+    Mirrors the `gap_analysis` Looker explore (dashboards 356/359/360), which
+    is a UNION of four Postgres sources. We query them directly so same-day
+    (Friday) data is included — the Looker PDT only rebuilds overnight.
+
+    Sources:
+      1. pdt_things_done_by_person  — doable/enquiry completions
+      2. public.phone_activity      — inbound/outbound call start + end
+      3. public.case_allocation     — case claimed + released
+      4. public.history             — system events (status changes etc.) —
+         only when include_history=True. This table is huge (~2 min scan), and
+         sources 1–3 already give hundreds of events/person/day, plenty to
+         detect idle gaps. Off by default to keep the button responsive.
+
+    Timestamps are normalised to naive UK-local time. Each source is queried
+    defensively; if one fails the others still return.
+    Returns {first_name: [(datetime, event_type), …]} sorted by timestamp.
+    """
+    from compat import get_postgres_url
+    db_url = get_postgres_url()
+
+    dates = get_weekday_dates(friday)
+    start = min(dates)
+    end = max(dates) + timedelta(days=1)
+
+    conn = _connect_postgres(db_url)
+    cur = conn.cursor()
+    pdt = _find_pdt_table(cur)
+
+    events = defaultdict(list)  # first_name -> [(ts, event_type)]
+
+    def add(full_name, ts, etype):
+        if not full_name or not ts:
+            return
+        first = FIRST_NAMES.get(full_name)
+        if first:
+            events[first].append((_to_local_naive(ts), etype))
+
+    # staff_member_id -> full_name (same source as pull_skips)
+    id_to_name = {}
+    try:
+        cur.execute(f"""
+            SELECT DISTINCT staff_member_id, staff_member_full_name
+            FROM {pdt}
+            WHERE staff_member_full_name IS NOT NULL
+        """)
+        id_to_name = {sid: name for sid, name in cur.fetchall()}
+    except Exception as e:
+        logging.warning(f"pull_activity_events: staff map failed: {e}")
+
+    # 1. Things done (pdt)
+    try:
+        cur.execute(f"""
+            SELECT staff_member_full_name, completed_method,
+                   doable_or_enquiry_action_completed_at
+            FROM {pdt}
+            WHERE doable_or_enquiry_action_completed_at >= %s
+              AND doable_or_enquiry_action_completed_at < %s
+              AND staff_member_full_name IS NOT NULL
+        """, (start, end))
+        for full_name, method, ts in cur.fetchall():
+            add(full_name, ts, method or 'thing_done')
+    except Exception as e:
+        logging.warning(f"pull_activity_events: pdt events failed: {e}")
+
+    # 2. Phone activity (start + end so long calls don't read as gaps)
+    try:
+        cur.execute("""
+            SELECT user_name, direction, started_at, ended_at
+            FROM public.phone_activity
+            WHERE started_at >= %s AND started_at < %s
+              AND user_name IS NOT NULL
+        """, (start, end))
+        for user_name, direction, started, ended in cur.fetchall():
+            add(user_name, started, f'{direction}_call')
+            if ended:
+                add(user_name, ended, f'{direction}_call_end')
+    except Exception as e:
+        logging.warning(f"pull_activity_events: phone events failed: {e}")
+
+    # 3. Case allocation (claimed + released)
+    try:
+        cur.execute("""
+            SELECT staff_member_id, created_at, released_at
+            FROM public.case_allocation
+            WHERE (created_at >= %s AND created_at < %s)
+               OR (released_at >= %s AND released_at < %s)
+        """, (start, end, start, end))
+        for sid, created, released in cur.fetchall():
+            name = id_to_name.get(sid)
+            if not name:
+                continue
+            if created and start <= created.date() <= max(dates):
+                add(name, created, 'case_claimed')
+            if released and start <= released.date() <= max(dates):
+                add(name, released, 'case_released')
+    except Exception as e:
+        logging.warning(f"pull_activity_events: case_allocation events failed: {e}")
+
+    # 4. History (system events) — huge table, opt-in only.
+    if include_history:
+        try:
+            cur.execute("""
+                SELECT logged_in_staff_member_id, event_type, created_at
+                FROM public.history
+                WHERE created_at >= %s AND created_at < %s
+                  AND logged_in_staff_member_id IS NOT NULL
+            """, (start, end))
+            for sid, etype, ts in cur.fetchall():
+                add(id_to_name.get(sid), ts, etype or 'history')
+        except Exception as e:
+            logging.warning(f"pull_activity_events: history events failed: {e}")
+
+    conn.close()
+
+    for first in events:
+        events[first].sort(key=lambda x: x[0])
+    return dict(events)
+
+
+def _overlap_minutes(a_start, a_end, b_start, b_end):
+    """Minutes of overlap between [a_start,a_end] and [b_start,b_end]."""
+    lo = max(a_start, b_start)
+    hi = min(a_end, b_end)
+    if hi <= lo:
+        return 0.0
+    return (hi - lo).total_seconds() / 60.0
+
+
+def detect_timeline_gaps(events_by_person, friday, exclusions_by_person=None,
+                          threshold_min=TIMELINE_GAP_THRESHOLD_MIN):
+    """Find idle gaps > threshold_min between consecutive work events.
+
+    For each person/day, sorts their events and measures the gap between each
+    consecutive pair. A gap is reported unless it's explained by a meeting:
+      - STANDUP_WINDOWS (global, by weekday)
+      - exclusions_by_person[first_name] = [(start_dt, end_dt), …] — lunch /
+        1:1s supplied by the caller (vary per person/day)
+    A gap is "explained" when the meeting windows cover all but < threshold_min
+    of it (windows padded 5 min each side).
+
+    Gaps before the first event / after the last event are NOT counted (we
+    only measure inter-event idle time within the working span).
+
+    Returns {first_name: [{'date','start','end','minutes'}, …]} — only people
+    with at least one unexplained gap appear.
+    """
+    exclusions_by_person = exclusions_by_person or {}
+    dates = get_weekday_dates(friday)
+    pad = timedelta(minutes=5)
+    out = {}
+
+    for first, evs in events_by_person.items():
+        person_excl = exclusions_by_person.get(first, [])
+        gaps = []
+        # Bucket events by date
+        by_day = defaultdict(list)
+        for ts, etype in evs:
+            by_day[ts.date()].append(ts)
+        for d in dates:
+            day_ts = sorted(by_day.get(d, []))
+            if len(day_ts) < 2:
+                continue
+            # Build exclusion windows for this weekday: standups (by weekday)
+            # + the daily lunch band + this person's 1:1 slot (if it's today)
+            # + any caller-supplied per-person windows.
+            day_windows = list(STANDUP_WINDOWS.get(d.weekday(), [])) + [LUNCH_BAND]
+            one_to_one = ONE_TO_ONE_SLOTS.get(first)
+            if one_to_one and one_to_one[0] == d.weekday():
+                day_windows.append((one_to_one[1], one_to_one[2]))
+            windows = []
+            for s_str, e_str in day_windows:
+                sh, sm = (int(p) for p in s_str.split(':'))
+                eh, em = (int(p) for p in e_str.split(':'))
+                windows.append((datetime.combine(d, dtime(sh, sm)) - pad,
+                                datetime.combine(d, dtime(eh, em)) + pad))
+            for ws, we in person_excl:
+                if ws.date() == d:
+                    windows.append((ws - pad, we + pad))
+
+            for prev, nxt in zip(day_ts, day_ts[1:]):
+                gap_min = (nxt - prev).total_seconds() / 60.0
+                if gap_min <= threshold_min:
+                    continue
+                covered = sum(_overlap_minutes(prev, nxt, ws, we)
+                              for ws, we in windows)
+                if (gap_min - covered) <= threshold_min:
+                    continue  # explained by meeting/lunch
+                gaps.append({
+                    'date': d.isoformat(),
+                    'start': prev.strftime('%H:%M'),
+                    'end': nxt.strftime('%H:%M'),
+                    'minutes': int(round(gap_min)),
+                })
+        if gaps:
+            out[first] = gaps
+    return out
+
+
+def suggest_quality_timeline(pw, gaps=None):
+    """Compute suggested quality_ok / timeline_ok + human-readable reasons.
+
+    Quality (Phase 1 = archive ratio): every single-role triage day must hit
+    the base archive ratio (0.85). Split triage days are skipped — the ratio
+    can't be cleanly attributed to the triage portion. If there are no
+    assessable triage days, quality passes with a note.
+
+    Timeline: pass if no unexplained gaps; otherwise flag for review with a
+    short sample of the gaps.
+
+    Returns (quality_suggested, quality_reason, timeline_suggested, timeline_reason).
+    """
+    gaps = gaps or []
+
+    # ── Quality: archive ratio on assessable (single-role) triage days ──
+    triage_days = [
+        (d, dr) for d, dr in sorted(pw.days.items())
+        if dr.is_working and not dr.segments
+        and dr.role.startswith('Triage') and dr.archive_ratio > 0
+    ]
+    below = [(d, dr) for d, dr in triage_days
+             if dr.archive_ratio < TRIAGE_ARCHIVE_RATIO_BASE]
+    if not triage_days:
+        q_suggested = True
+        q_reason = 'No triage days to assess on archive ratio'
+    elif below:
+        days_str = ', '.join(d.strftime('%a') for d, _ in below)
+        lowest = min(dr.archive_ratio for _, dr in below)
+        q_suggested = False
+        q_reason = (f'Archive ratio below 85% on {days_str} '
+                    f'(lowest {lowest * 100:.0f}%)')
+    else:
+        avg = sum(dr.archive_ratio for _, dr in triage_days) / len(triage_days)
+        q_suggested = True
+        q_reason = f'Archive ratio OK (avg {avg * 100:.0f}%)'
+
+    # ── Timeline: unexplained gaps ──
+    # All gaps > 10 min are listed for review; only a substantial block
+    # (≥ TIMELINE_REVIEW_GAP_MIN) trips the suggestion to REVIEW, so people
+    # with only normal short gaps don't all get flagged.
+    notable = sorted((g for g in gaps if g['minutes'] >= TIMELINE_REVIEW_GAP_MIN),
+                     key=lambda g: -g['minutes'])
+    if not gaps:
+        t_suggested = True
+        t_reason = f'No unexplained gaps over {TIMELINE_GAP_THRESHOLD_MIN} min'
+    elif not notable:
+        t_suggested = True
+        t_reason = f'{len(gaps)} minor gap(s) only (all < {TIMELINE_REVIEW_GAP_MIN}m)'
+    else:
+        def _fmt(g):
+            day = date.fromisoformat(g['date']).strftime('%a')
+            return f"{day} {g['start']}–{g['end']} ({g['minutes']}m)"
+        sample = '; '.join(_fmt(g) for g in notable[:3])
+        more = f' +{len(notable) - 3} more' if len(notable) > 3 else ''
+        t_suggested = False
+        t_reason = (f'{len(notable)} gap(s) ≥ {TIMELINE_REVIEW_GAP_MIN}m to review: '
+                    f'{sample}{more}')
+
+    return q_suggested, q_reason, t_suggested, t_reason
+
+
+def run_quality_timeline_checks(week_data, friday, exclusions_by_person=None):
+    """Pull activity, detect gaps, and set quality/timeline suggestions on each PW.
+
+    Suggestions are advisory. `*_suggested` / `*_reason` / `timeline_gaps` are
+    always refreshed. The live `quality_ok` / `timeline_ok` gates are set to the
+    suggestion ONLY when Jo hasn't manually overridden the previous suggestion
+    (current value still equals the prior suggestion, or none existed yet) — so
+    re-running never clobbers a manual decision.
+
+    `exclusions_by_person`: optional {first_name: [(start_dt, end_dt), …]} of
+    lunch / 1:1 windows to exclude (standups are excluded globally).
+
+    Returns a summary list of dicts (name, quality, timeline, gaps, reasons).
+    """
+    events = pull_activity_events(friday)
+    gaps_by_person = detect_timeline_gaps(events, friday, exclusions_by_person)
+
+    summary = []
+    for name, pw in week_data.items():
+        if pw.days_worked == 0:
+            continue
+        gaps = gaps_by_person.get(name, [])
+        q_sug, q_reason, t_sug, t_reason = suggest_quality_timeline(pw, gaps)
+
+        # Apply without clobbering a manual override.
+        if pw.quality_suggested is None or pw.quality_ok == pw.quality_suggested:
+            pw.quality_ok = q_sug
+        if pw.timeline_suggested is None or pw.timeline_ok == pw.timeline_suggested:
+            pw.timeline_ok = t_sug
+
+        pw.quality_suggested = q_sug
+        pw.quality_reason = q_reason
+        pw.timeline_suggested = t_sug
+        pw.timeline_reason = t_reason
+        pw.timeline_gaps = gaps
+
+        summary.append({
+            'name': name, 'quality': q_sug, 'timeline': t_sug,
+            'gaps': len(gaps), 'q_reason': q_reason, 't_reason': t_reason,
+        })
+    return summary
+
+
 # ── State persistence ───────────────────────────────────────────────────────
 # Local: files under STATE_DIR (~/.claude/scheduled-tasks/reward-time/).
 # Cloud: files inside the cs-scripts-state Google Drive folder.
@@ -466,6 +843,11 @@ def save_week(friday, week_data):
         data[name] = {
             'days': days_ser, 'skips': pw.skips,
             'quality_ok': pw.quality_ok, 'timeline_ok': pw.timeline_ok,
+            'quality_suggested': pw.quality_suggested,
+            'quality_reason': pw.quality_reason,
+            'timeline_suggested': pw.timeline_suggested,
+            'timeline_reason': pw.timeline_reason,
+            'timeline_gaps': pw.timeline_gaps,
             'overrides': pw.overrides, 'override_eligible': pw.override_eligible,
             'weekly_hours': pw.weekly_hours, 'days_worked': pw.days_worked,
             'days_absent': pw.days_absent, 'expected_days': pw.expected_days,
@@ -492,6 +874,11 @@ def load_week(friday):
         pw.skips = d.get('skips', 0)
         pw.quality_ok = d.get('quality_ok', False)
         pw.timeline_ok = d.get('timeline_ok', False)
+        pw.quality_suggested = d.get('quality_suggested', None)
+        pw.quality_reason = d.get('quality_reason', '')
+        pw.timeline_suggested = d.get('timeline_suggested', None)
+        pw.timeline_reason = d.get('timeline_reason', '')
+        pw.timeline_gaps = d.get('timeline_gaps', [])
         pw.overrides = d.get('overrides', [])
         pw.override_eligible = d.get('override_eligible', '')
         pw.weekly_hours = d.get('weekly_hours', WEEKLY_HOURS.get(name, 40))
