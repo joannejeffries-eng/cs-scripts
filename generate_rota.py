@@ -59,21 +59,33 @@ SEC_EMAIL = 'Email Health'
 DB_NAMES = {
     'Becky': 'Becky Smith', 'Elida': 'Elida Gizli', 'Fionn': 'Fionn Burrows',
     'Jade': 'Jade Regent', 'Kate': "Kate O'Neill", 'Kirsty': 'Kirsty Rowley',
-    'Bella': 'Bella Brayford', 'Clare': 'Clare Brown', 'Cris': 'Cris Macagi',
+    'Clare': 'Clare Brown', 'Cris': 'Cris Macagi',
     'Erika': 'Erika Frolova', 'Harriet': 'Harriet Clifton-Sprigg',
     'Lizzie': 'Lizzie Williamson', 'Lucy': 'Lucy Riordan',
     'Maisha': 'Maisha Begum', 'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
     'Tara': 'Tara Dunkley', 'Thea': 'Thea Willsmore',
+    'Harry': 'Harry McNicholas', 'Roseanne': 'Roseanne Brooks-Brown',
 }
 
 TL_TEAMS = {
-    'Courtney': ['Fionn', 'Kate', 'Becky', 'Jade', 'Elida', 'Harriet'],
-    'Yasmin': ['Tara', 'Sophie', 'Noemi', 'Lizzie', 'Kirsty'],
-    'Jess': ['Bella', 'Cris', 'Clare', 'Erika', 'Lucy', 'Maisha', 'Thea'],
+    'Courtney': ['Fionn', 'Kate', 'Becky', 'Jade', 'Elida', 'Harriet', 'Harry'],
+    'Yasmin': ['Tara', 'Sophie', 'Noemi', 'Lizzie', 'Kirsty', 'Roseanne'],
+    'Jess': ['Cris', 'Clare', 'Erika', 'Lucy', 'Maisha', 'Thea'],
 }
 
 ALL_TLS = ['Yasmin', 'Courtney', 'Jess']
 ALL_AGENTS = sorted(DB_NAMES.keys())
+
+# New-starter gating: don't assign live work before the start date.
+START_DATES = {
+    'Harry': date(2026, 6, 1),
+    'Roseanne': date(2026, 6, 10),
+}
+# Status overrides applied when not set in the sheet's Config: Defaults tab.
+DEFAULT_STATUS = {
+    'Harry': 'training',
+    'Roseanne': 'training',
+}
 
 # Day indices (Mon=0 through Fri=4)
 DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
@@ -93,6 +105,7 @@ class PersonConfig:
     is_fixed: bool = False
     phone_secondary: str = ''
     status: str = 'active'  # active, training, excluded
+    start_date: date = None  # if set, days before this are forced to Non working day
 
 
 @dataclass
@@ -140,7 +153,6 @@ DEFAULT_SKILLS = {
     'Kate':    {'Inbound', 'Uncat', 'Webchat', 'E-sign', 'LMS/LE'},
     'Elida':   {'Inbound', 'Uncat', 'Missed Calls'},
     'Harriet': {'Inbound', 'Webchat', 'LMS/LE', 'Missed Calls'},
-    'Bella':   {'Triage', 'ICS'},
     'Cris':    {'Triage', 'Uncat', 'Lender Chase', 'Verify Addr', 'Call&Chase',
                 'E-sign', 'LMS/LE', 'Video', 'ID Checks', 'ICS'},
     'Maisha':  {'Triage', 'Inbound', 'Lender Chase', 'Verify Addr', 'Call&Chase',
@@ -160,6 +172,8 @@ DEFAULT_SKILLS = {
     'Kirsty':  {'Triage', 'LMS/LE'},
     'Lizzie':  {'Triage', 'Webchat', 'Lender Chase', 'Verify Addr', 'Call&Chase',
                 'LMS/LE', 'Video', 'ID Checks'},
+    'Harry':   set(),  # New starter — update as training completes (leaned Inbound at interview)
+    'Roseanne': set(),  # New starter — update as training completes
 }
 
 # Default working hours per day (Mon-Fri, in hours). 0 = non-working day.
@@ -170,7 +184,6 @@ DEFAULT_HOURS = {
     'Jade':    {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Elida':   {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Harriet': {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
-    'Bella':   {0: 7, 1: 7, 2: 7, 3: 7, 4: 7},
     'Cris':    {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Clare':   {0: 0, 1: 8, 2: 8, 3: 8, 4: 8},
     'Erika':   {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
@@ -182,6 +195,8 @@ DEFAULT_HOURS = {
     'Sophie':  {0: 6, 1: 6, 2: 6, 3: 6, 4: 6},
     'Kirsty':  {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Lizzie':  {0: 6, 1: 6, 2: 6, 3: 6, 4: 6},
+    'Harry':   {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
+    'Roseanne': {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
 }
 
 # Shift start/end times (hour as float, e.g. 9.5 = 9:30).
@@ -195,7 +210,6 @@ DEFAULT_SHIFTS = {
     'Jade':    (9, 18),      # 9-6
     'Elida':   (8, 17),      # 8-5
     'Harriet': (8, 17),      # 8-5
-    'Bella':   (7, 16.5),    # 7-8:30, 9:15-3, 3:45-4:30 (split — gaps in middle)
     'Cris':    (8, 17),      # 8-5
     'Clare':   (8, 17),      # 8-5 (off Mon)
     'Erika':   (8, 17),      # 8-5
@@ -207,6 +221,8 @@ DEFAULT_SHIFTS = {
     'Sophie':  (7, 15),      # 7-8 + 9:30-3 (split — gap 8-9:30)
     'Kirsty':  (9, 18),      # 9-6
     'Lizzie':  (8, 14),      # 8-2
+    'Harry':   (9, 18),      # 9-6 (new starter)
+    'Roseanne': (9, 18),     # 9-6 (new starter)
 }
 
 # Phone coverage window (inbound phones must be staffed across this range)
@@ -667,11 +683,18 @@ def read_original_rota(gc, monday):
     all_data = ws.get_all_values()
 
     header = all_data[4]
+    # Agent name columns start at index 2 and run until the first blank
+    # column, which separates the name block from the role-summary block
+    # (📞 Phones, 📋 Triage, …). Reading dynamically rather than a fixed
+    # slice means the rota can grow (new starters) without silently
+    # dropping people off the end — the old [2:24] cap was cutting off
+    # Noemi + Kirsty once the team passed 22.
     agent_cols = {}
-    for idx, cell in enumerate(header[2:24], start=2):
-        name = cell.strip()
-        if name:
-            agent_cols[name] = idx
+    for idx in range(2, len(header)):
+        name = header[idx].strip()
+        if not name:
+            break  # blank column = end of the agent block
+        agent_cols[name] = idx
 
     week_dates = {monday + timedelta(days=i): i for i in range(5)}
     assignments = {name: {} for name in agent_cols}
@@ -743,11 +766,18 @@ def read_absences_from_original(gc, monday):
     all_data = ws.get_all_values()
 
     header = all_data[4]
+    # Agent name columns start at index 2 and run until the first blank
+    # column, which separates the name block from the role-summary block
+    # (📞 Phones, 📋 Triage, …). Reading dynamically rather than a fixed
+    # slice means the rota can grow (new starters) without silently
+    # dropping people off the end — the old [2:24] cap was cutting off
+    # Noemi + Kirsty once the team passed 22.
     agent_cols = {}
-    for idx, cell in enumerate(header[2:24], start=2):
-        name = cell.strip()
-        if name:
-            agent_cols[name] = idx
+    for idx in range(2, len(header)):
+        name = header[idx].strip()
+        if not name:
+            break  # blank column = end of the agent block
+        agent_cols[name] = idx
 
     week_dates = {monday + timedelta(days=i): i for i in range(5)}
     absences = {}
@@ -827,14 +857,15 @@ def build_people(config_defaults=None, config_skills=None, config_hours=None,
         skills = (config_skills or DEFAULT_SKILLS).get(name, set())
         hours = (config_hours or DEFAULT_HOURS).get(name, {di: 8 for di in range(5)})
 
+        default_status = DEFAULT_STATUS.get(name, 'active')
         defaults = (config_defaults or {}).get(name, {})
         if not defaults and name in DEFAULT_ASSIGNMENTS:
             drole, fixed, sec = DEFAULT_ASSIGNMENTS[name]
             defaults = {'default_role': drole, 'is_fixed': fixed,
-                        'phone_secondary': sec, 'status': 'active'}
+                        'phone_secondary': sec, 'status': default_status}
         elif not defaults:
             defaults = {'default_role': '', 'is_fixed': False,
-                        'phone_secondary': '', 'status': 'active'}
+                        'phone_secondary': '', 'status': default_status}
 
         shift = (config_shifts or DEFAULT_SHIFTS).get(name, (9, 18))
         people[name] = PersonConfig(
@@ -849,6 +880,7 @@ def build_people(config_defaults=None, config_skills=None, config_hours=None,
             is_fixed=defaults.get('is_fixed', False),
             phone_secondary=defaults.get('phone_secondary', ''),
             status=defaults.get('status', 'active'),
+            start_date=START_DATES.get(name),
         )
 
     return people
@@ -1012,7 +1044,9 @@ def generate_week(monday, people, role_targets=None, tl_rotation=None,
         for di in working_days:
             if di in assignments[name]:
                 continue
-            if person.hours.get(di, 0) == 0:
+            if person.start_date and (monday + timedelta(days=di)) < person.start_date:
+                assignments[name][di] = ROLE_NWD  # not joined yet
+            elif person.hours.get(di, 0) == 0:
                 assignments[name][di] = ROLE_NWD
             elif person.status in ('training', 'excluded'):
                 assignments[name][di] = ROLE_TRAINING
@@ -1713,7 +1747,6 @@ def write_overrides(gc, sheet_id):
         [],
         ['INDIVIDUAL TARGET OVERRIDES'],
         ['Name', 'Role', 'Baseline', 'Stretch', 'Reason', 'Active'],
-        ['Bella', 'Triage', '98', '', 'Webchat morning split — confirmed Jess 24 Apr', 'Y'],
         [],
         ['STANDING RULES (applied automatically by the script)'],
         ['Rule', 'Description', 'Active'],
