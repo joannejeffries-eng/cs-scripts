@@ -17,16 +17,16 @@ CREDS_PATH = Path.home() / '.config/juno/claude-code/google-credentials.json'
 # Data tab rows: Core Phones start at row 4 (1-indexed), Wider Team at row 10
 # (row 9 is the "WIDER TEAM" section header)
 CORE_PHONES_DATA_ROWS = [4, 5, 6, 7, 8]      # Becky, Elida, Fionn, Jade, Kate
-WIDER_TEAM_DATA_ROWS = list(range(10, 24))     # Bella..Thea (14 agents, rows 10-23, incl. Lucy)
+WIDER_TEAM_DATA_ROWS = list(range(10, 23))     # Charne..Thea (13 agents, rows 10-22, incl. Lucy)
 
 # TL View rows
 # Row 1: title, Row 2: week date, Row 3: headers (frozen)
 # Row 4: "Core Phones" section header
 # Rows 5-9: Core Phones agents
 # Row 10: "Wider Team" section header
-# Rows 11-24: Wider Team agents (14 agents incl. Lucy)
+# Rows 11-23: Wider Team agents (13 agents incl. Lucy)
 CORE_TL_ROWS = list(range(5, 10))     # 5..9
-WIDER_TL_ROWS = list(range(11, 25))   # 11..24
+WIDER_TL_ROWS = list(range(11, 24))   # 11..23
 
 # Day config: (role_col, baselineMet_col, stretchMet_col) in Data tab (0-indexed)
 # Fri D-I (3-8), Mon J-O (9-14), Tue P-U (15-20), Wed V-AA (21-26), Thu AB-AG (27-32)
@@ -51,11 +51,13 @@ TL_CALC_TEAMS = {
         ('Noemi Sip', 40), ('Lizzie Williamson', 30), ('Kirsty Rowley', 40),
     ],
     'Jessica Jackson': [
-        ('Bella Brayford', 40), ('Cris Macagi', 40), ('Clare Brown', 32),
+        ('Cris Macagi', 40), ('Clare Brown', 32),
         ('Erika Frolova', 40), ('Lucy Riordan', 40), ('Maisha Begum', 40),
         ('Thea Willsmore', 40),
     ],
 }
+# Harry McNicholas (Courtney) & Roseanne Brooks-Brown (Yasmin) join here once they
+# finish training and enter the reward scheme — not in the tracker yet.
 
 
 def col_letter(idx):
