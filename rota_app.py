@@ -1572,7 +1572,7 @@ elif page == "🏆 Reward Time":
     st.caption(f"Reward week: **{reward_friday.strftime('%d %b')} (Fri)** → **{reward_end.strftime('%d %b')} (Thu)**")
 
     # Week picker
-    col_pick1, col_pick2, col_pick3, col_pick4, col_pick5 = st.columns([2, 1, 1, 1, 1])
+    col_pick1, col_pick2, col_pick3, col_pick4, col_pick5, col_pick6 = st.columns([2, 1, 1, 1, 1, 1])
     with col_pick1:
         pick_date = st.date_input(
             "View reward week containing",
@@ -1614,6 +1614,16 @@ elif page == "🏆 Reward Time":
             help="Apply captured mid-day role moves from #dry-run-testing-jo "
                  "(temporarily — was #client-support-leads). Splits each day "
                  "using moves ≥ 30 min.",
+        )
+    with col_pick6:
+        st.write("")
+        checks_clicked = st.button(
+            "🔍 Run checks",
+            use_container_width=True,
+            help="Auto-suggest Quality + Timeline per person: archive ratio on "
+                 "triage days, and work-activity gaps over 13 min (excluding "
+                 "standups/lunch); a block ≥30 min flags Timeline for review. "
+                 "Pre-fills the tick boxes — you can still override any of them.",
         )
 
     # Load or initialise week data
@@ -1850,6 +1860,35 @@ elif page == "🏆 Reward Time":
             except Exception as e:
                 st.error(f"Apply moves failed: {e}")
 
+    if checks_clicked:
+        with st.spinner("Pulling activity timelines + computing quality/timeline suggestions…"):
+            try:
+                summary = rt.run_quality_timeline_checks(week_data, reward_friday)
+                save_week(reward_friday, week_data)
+                st.session_state[rw_key] = week_data
+                n_q_review = sum(1 for s in summary if not s['quality'])
+                n_t_review = sum(1 for s in summary if not s['timeline'])
+                st.success(
+                    f"Checked {len(summary)} people · "
+                    f"Quality flagged {n_q_review} · Timeline flagged {n_t_review}. "
+                    f"Suggestions pre-filled below — override any as needed."
+                )
+                flagged = [s for s in summary if not s['quality'] or not s['timeline']]
+                if flagged:
+                    with st.expander(f"⚠️ {len(flagged)} to review"):
+                        for s in flagged:
+                            bits = []
+                            if not s['quality']:
+                                bits.append(f"Quality — {s['q_reason']}")
+                            if not s['timeline']:
+                                bits.append(f"Timeline — {s['t_reason']}")
+                            st.caption(f"  • **{s['name']}**: " + ' · '.join(bits))
+                st.rerun()
+            except rt.CloudDBUnreachableError as e:
+                st.warning(str(e))
+            except Exception as e:
+                st.error(f"Checks failed: {e}")
+
     # ── Throughput grid ──
     st.subheader("Throughput vs Targets")
     day_labels = [d.strftime("%a %d/%m") for d in reward_dates]
@@ -1979,6 +2018,10 @@ elif page == "🏆 Reward Time":
                     value=pw.quality_ok,
                     key=f"quality_{rw_key}_{name}",
                 )
+                if pw.quality_suggested is not None:
+                    icon = "✅" if pw.quality_suggested else "⚠️"
+                    overridden = " · overridden" if pw.quality_ok != pw.quality_suggested else ""
+                    st.caption(f"🤖 {icon} {pw.quality_reason}{overridden}")
                 if new_quality != pw.quality_ok:
                     if pw.quality_ok != new_quality:
                         add_override(pw, 'quality_ok', pw.quality_ok, new_quality, 'Toggled in app')
@@ -1996,6 +2039,15 @@ elif page == "🏆 Reward Time":
                     value=pw.timeline_ok,
                     key=f"timeline_{rw_key}_{name}",
                 )
+                if pw.timeline_suggested is not None:
+                    icon = "✅" if pw.timeline_suggested else "⚠️"
+                    overridden = " · overridden" if pw.timeline_ok != pw.timeline_suggested else ""
+                    st.caption(f"🤖 {icon} {pw.timeline_reason}{overridden}")
+                    if pw.timeline_gaps:
+                        with st.expander(f"🕳️ {len(pw.timeline_gaps)} gap(s)"):
+                            for g in pw.timeline_gaps:
+                                gday = date.fromisoformat(g['date']).strftime('%a %d/%m')
+                                st.caption(f"  • {gday} {g['start']}–{g['end']} ({g['minutes']}m)")
                 if new_timeline != pw.timeline_ok:
                     if pw.timeline_ok != new_timeline:
                         add_override(pw, 'timeline_ok', pw.timeline_ok, new_timeline, 'Toggled in app')
