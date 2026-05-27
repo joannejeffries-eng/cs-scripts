@@ -451,6 +451,7 @@ PEGASUS_CHANNELS = {
     'Erika':    'C09G2DF5EQP',   # #pegasus-erika-l
     'Fionn':    'C06L8394GAZ',   # #pegasus-fionn-c
     'Harriet':  'C09JG8XGVHA',   # #pegasus-harriet-l
+    'Harry':    'C0B78KZUG1E',   # #pegasus-harry-c
     'Jade':     'C0AGJPAJWQ1',   # #pegasus-jade-c
     'Kate':     'C05FN07KF8B',   # #pegasus-kate-c
     'Kirsty':   'C0AMJTHL4SZ',   # #pegasus-kirsty-y
@@ -458,6 +459,7 @@ PEGASUS_CHANNELS = {
     'Lucy':     'C0AU24PSF39',   # #pegasus-lucy-j
     'Maisha':   'C09GN3P0JA0',   # #pegasus-maisha-j
     'Noemi':    'C09AJD6T7H7',   # #pegasus-noemi-y
+    'Roseanne': 'C0B6G6NJ6DP',   # #pegasus-roseanne-y
     'Sophie':   'C095Y5UAFV4',   # #pegasus-sophie-y
     'Tara':     'C07TH1E24EP',   # #pegasus-tara-y
     'Thea':     'C09TASX0FLY',   # #pegasus-thea-l
@@ -473,10 +475,12 @@ PEGASUS_LABELS = {
     'Clare': '#pegasus-clare-j',  'Cris': '#pegasus-cris-j',
     'Elida': '#pegasus-elida-c',  'Erika': '#pegasus-erika-l',
     'Fionn': '#pegasus-fionn-c',  'Harriet': '#pegasus-harriet-l',
+    'Harry': '#pegasus-harry-c',
     'Jade': '#pegasus-jade-c',    'Kate': '#pegasus-kate-c',
     'Kirsty': '#pegasus-kirsty-y','Lizzie': '#pegasus-lizzie-l',
     'Lucy': '#pegasus-lucy-j',    'Maisha': '#pegasus-maisha-j',
-    'Noemi': '#pegasus-noemi-y',  'Sophie': '#pegasus-sophie-y',
+    'Noemi': '#pegasus-noemi-y',  'Roseanne': '#pegasus-roseanne-y',
+    'Sophie': '#pegasus-sophie-y',
     'Tara': '#pegasus-tara-y',    'Thea': '#pegasus-thea-l',
     'Courtney': '#pegasus-courtney',
     'Jess': '#pegasus-jess',
