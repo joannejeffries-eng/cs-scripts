@@ -31,6 +31,7 @@ TEST_ROTA_ID = None
 ROLE_PHONES = 'Inbound phones'
 ROLE_TRIAGE = 'Triage only'
 ROLE_TRIAGE_LC = 'Triage + lender chasing'
+ROLE_TRIAGE_VC = 'Triage and Video Calls'
 ROLE_ICS = 'Case setup only'
 ROLE_CHASING = 'Chasing'
 ROLE_TL = 'Team lead'
