@@ -136,6 +136,15 @@ def _ts_to_hhmm(message_ts: str) -> str:
 # Slack formatting noise (curly quotes, smart arrows) first.
 
 _ARROW_RE = re.compile(r'[→⟶➡️]|->|=>')   # everything we treat as "to"
+# "clear all" / "reset" / "clear moves" / "reset all moves" / "scrap moves" /
+# "remove all moves" / "start over" — wipes today's captured moves.
+_RESET_RE = re.compile(
+    r'^\s*(?:clear|reset|scrap|remove|wipe|undo|cancel|start\s+over)'
+    r'(?:\s+(?:all|the))?'
+    r'(?:\s+moves?)?'
+    r'(?:\s+(?:for\s+)?today)?\s*$',
+    re.IGNORECASE,
+)
 _BACK_RE = re.compile(r'^\s*(?P<name>\w+)\s+back(?:\s+to\s+(?P<role>.+?))?\s*$',
                        re.IGNORECASE)
 _MOVE_RE = re.compile(
@@ -174,6 +183,16 @@ def parse_role_change_message(text: str, message_ts: str,
         noted_at = datetime.fromtimestamp(float(message_ts)).isoformat(timespec='seconds')
     except (ValueError, TypeError):
         pass
+
+    # "clear all" / "reset" / "scrap moves" etc. — wipe today's moves.
+    if _RESET_RE.match(clean):
+        return {
+            'action': 'reset',
+            'raw_text': text,
+            'message_ts': message_ts,
+            'noted_by': noted_by,
+            'noted_at': noted_at,
+        }
 
     # "Name back" / "Name back to X"
     m = _BACK_RE.match(clean)
