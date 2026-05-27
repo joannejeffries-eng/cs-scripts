@@ -62,6 +62,19 @@ ROLE_ALIASES = {
     'triage+lc':         'Triage + lender chasing',
     'triage and lc':     'Triage + lender chasing',
     'webchat':           'Inbound phones',   # webchat sits under phones role
+    # Non-role states — part-day training / leave run from Slack too.
+    # All have 0/0 targets in ROLE_TARGETS, so the moved-to portion of the
+    # day doesn't count against throughput. (Appointments stay in Daily Notes.)
+    'training':          'Training',
+    'train':             'Training',
+    'leave':             'Part day AL',
+    'al':                'Part day AL',
+    'annual leave':      'Part day AL',
+    'holiday':           'Part day AL',
+    'hol':               'Part day AL',
+    'off':               'Part day AL',
+    'sick':              'Part day AL',
+    'sickness':          'Part day AL',
 }
 
 # Default move duration when no end time is given AND no closing message arrives.

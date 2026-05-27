@@ -2002,10 +2002,12 @@ SPLITTABLE_ROLES = [
 ]
 
 
-# Segment roles that come from Daily Notes (reward time / appointments /
-# part-day leave / training), NOT from role moves. apply_moves_to_day must
-# preserve these when it re-derives a day from the move list.
-_PROTECTED_SEGMENT_PREFIXES = ('Reward time', 'Appointment', 'Part day AL', 'Training')
+# Segment roles that come from Daily Notes (reward time + appointments), NOT
+# from Slack moves. apply_moves_to_day preserves these when it re-derives a
+# day from the move list. Training and part-day leave are now Slack moves, so
+# they're deliberately NOT protected — clearing the move clears them, same as
+# a role switch.
+_PROTECTED_SEGMENT_PREFIXES = ('Reward time', 'Appointment')
 
 
 def apply_moves_to_day(pw, target_date, moves, *, noise_floor_min=30):

@@ -112,10 +112,8 @@ from reward_time import (
     build_reward_slack_message, build_tl_messages, build_reward_message_by_team,
     build_daily_notes_draft,
     write_audit_entry, write_week_summary,
-    adjust_shift_hours, split_day, unsplit_day,
     REWARD_DAYS, ALL_AGENTS as RT_AGENTS, TL_TEAMS, ROLE_TARGETS as RT_TARGETS,
     WEEKLY_HOURS, SKIP_THRESHOLD_WEEKLY, STANDARD_SHIFT_HOURS, DAILY_HOURS,
-    SPLITTABLE_ROLES, RoleSegment,
 )
 
 @st.cache_resource(ttl=300)
@@ -2091,117 +2089,25 @@ elif page == "🏆 Reward Time":
                         save_week(reward_friday, week_data)
                         st.rerun()
 
-            # ── Day adjustments (partial days & split roles) ──
-            st.caption("**Day adjustments:**")
-            for d_idx, d in enumerate(reward_dates):
+            # ── Day shape (read-only) ──
+            # Splits, training and part-day leave are all driven from the Slack
+            # role-change message + 🧩 Apply moves; reward-time splits come from
+            # Daily Notes + 🔃 Resync. This is a read-only view of the result —
+            # no manual Split/Unsplit/hours editing here any more.
+            st.caption("**Day shape** (set via Slack moves + Daily Notes):")
+            for d in reward_dates:
                 dr = pw.days.get(d)
                 if not dr or not dr.is_working:
                     continue
                 day_label = d.strftime('%a %d/%m')
-                adj_cols = st.columns([2, 2, 2, 1])
-
-                with adj_cols[0]:
-                    st.caption(f"**{day_label}** — {dr.role}")
-
-                with adj_cols[1]:
-                    new_hours = st.number_input(
-                        "Hours", min_value=1.0, max_value=10.0,
-                        value=float(dr.shift_hours), step=0.5,
-                        key=f"shift_{rw_key}_{name}_{d_idx}",
-                        label_visibility="collapsed",
+                if dr.segments:
+                    segs = ' · '.join(
+                        f"{s.role} {s.minutes / 60:.2g}h ({s.actual}/{s.target_base})"
+                        for s in dr.segments
                     )
-                    if abs(new_hours - dr.shift_hours) > 0.01:
-                        old_h = adjust_shift_hours(pw, d, new_hours)
-                        try:
-                            write_audit_entry(reward_friday, name, f'shift_hours ({day_label})', old_h, new_hours, 'Adjusted in app')
-                        except Exception:
-                            pass
-                        add_override(pw, f'shift_hours ({day_label})', old_h, new_hours, 'Adjusted in app')
-                        save_week(reward_friday, week_data)
-
-                with adj_cols[2]:
-                    if not dr.segments:
-                        if st.button("✂️ Split", key=f"split_btn_{rw_key}_{name}_{d_idx}"):
-                            st.session_state[f"splitting_{rw_key}_{name}_{d_idx}"] = True
-
-                        if st.session_state.get(f"splitting_{rw_key}_{name}_{d_idx}"):
-                            available_roles = [r for r in SPLITTABLE_ROLES if r != dr.role]
-                            split_role_b = st.selectbox(
-                                "Second role", available_roles,
-                                key=f"split_role_b_{rw_key}_{name}_{d_idx}",
-                                label_visibility="collapsed",
-                            )
-                            third_options = ['(none)'] + [r for r in SPLITTABLE_ROLES if r not in (dr.role, split_role_b)]
-                            split_role_c = st.selectbox(
-                                "Third role (optional)", third_options,
-                                key=f"split_role_c_{rw_key}_{name}_{d_idx}",
-                                label_visibility="collapsed",
-                            )
-                            three_way = split_role_c != '(none)'
-
-                            if three_way:
-                                third = dr.shift_hours / 3
-                                hrs_a = st.number_input(
-                                    f"Hours on {dr.role}",
-                                    min_value=0.5, max_value=dr.shift_hours - 1.0,
-                                    value=round(third, 1), step=0.5,
-                                    key=f"split_hrs_a_{rw_key}_{name}_{d_idx}",
-                                )
-                                hrs_b = st.number_input(
-                                    f"Hours on {split_role_b}",
-                                    min_value=0.5, max_value=max(0.5, dr.shift_hours - hrs_a - 0.5),
-                                    value=round(min(third, dr.shift_hours - hrs_a - 0.5), 1), step=0.5,
-                                    key=f"split_hrs_b_{rw_key}_{name}_{d_idx}",
-                                )
-                                hrs_c = round(dr.shift_hours - hrs_a - hrs_b, 1)
-                                st.caption(f"→ {hrs_c}h on {split_role_c}")
-                            else:
-                                half = dr.shift_hours / 2
-                                hrs_a = st.number_input(
-                                    f"Hours on {dr.role}",
-                                    min_value=0.5, max_value=dr.shift_hours - 0.5,
-                                    value=half, step=0.5,
-                                    key=f"split_hrs_a_{rw_key}_{name}_{d_idx}",
-                                )
-                                hrs_b = round(dr.shift_hours - hrs_a, 1)
-                                hrs_c = 0
-                                st.caption(f"→ {hrs_b}h on {split_role_b}")
-
-                            if st.button("Apply split", key=f"split_apply_{rw_key}_{name}_{d_idx}"):
-                                orig_role = dr.role
-                                if three_way:
-                                    spec = [(orig_role, hrs_a), (split_role_b, hrs_b), (split_role_c, hrs_c)]
-                                    reason = f"Split {hrs_a}h {orig_role} / {hrs_b}h {split_role_b} / {hrs_c}h {split_role_c}"
-                                else:
-                                    spec = [(orig_role, hrs_a), (split_role_b, hrs_b)]
-                                    reason = f"Split {hrs_a}h {orig_role} / {hrs_b}h {split_role_b}"
-                                split_day(pw, d, spec)
-                                add_override(pw, f'split ({day_label})', orig_role, dr.role, reason)
-                                try:
-                                    write_audit_entry(reward_friday, name, f'split ({day_label})', orig_role, dr.role, reason)
-                                except Exception:
-                                    pass
-                                save_week(reward_friday, week_data)
-                                del st.session_state[f"splitting_{rw_key}_{name}_{d_idx}"]
-                                st.rerun()
-                    else:
-                        # Already split — show segments and allow unsplit
-                        for seg in dr.segments:
-                            mins_h = seg.minutes / 60
-                            st.caption(f"  {seg.role}: {mins_h:.1f}h — {seg.actual}/{seg.target_base}")
-                        if st.button("↩️ Unsplit", key=f"unsplit_{rw_key}_{name}_{d_idx}"):
-                            orig_role = dr.segments[0].role  # revert to first segment's role
-                            unsplit_day(pw, d, orig_role)
-                            add_override(pw, f'unsplit ({day_label})', dr.role, orig_role, 'Reverted split')
-                            try:
-                                write_audit_entry(reward_friday, name, f'unsplit ({day_label})', dr.role, orig_role, 'Reverted split')
-                            except Exception:
-                                pass
-                            save_week(reward_friday, week_data)
-                            st.rerun()
-
-                with adj_cols[3]:
-                    st.caption(f"{dr.shift_hours}h")
+                    st.caption(f"**{day_label}** — {segs}")
+                else:
+                    st.caption(f"**{day_label}** — {dr.role} ({dr.shift_hours:.2g}h)")
 
             # Audit trail
             if pw.overrides:
