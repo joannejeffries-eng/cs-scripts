@@ -1041,24 +1041,8 @@ if page == "🗓️ Weekly Rota":
         for col, (label, colour) in zip(legend_cols2, legend_items2):
             col.markdown(f'<span style="background-color:{colour};padding:4px 8px;border-radius:4px">{label}</span>', unsafe_allow_html=True)
 
-    # Quick absence marker
-    st.subheader("Mark absence")
-    abs_cols = st.columns([2, 2, 2, 1])
-    active_names = sorted(set(assignments.keys()) - set(ALL_TLS))
-    with abs_cols[0]:
-        abs_name = st.selectbox("Person", [""] + active_names + ALL_TLS, key="abs_name")
-    with abs_cols[1]:
-        abs_day = st.selectbox("Day", DAY_NAMES, key="abs_day")
-    with abs_cols[2]:
-        abs_type = st.selectbox("Type", [ROLE_AL, ROLE_ABSENCE], key="abs_type")
-    with abs_cols[3]:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Apply", use_container_width=True):
-            if abs_name:
-                di = DAY_NAMES.index(abs_day)
-                assignments[abs_name][di] = abs_type
-                st.session_state[f"assignments_{week_key}"] = assignments
-                st.rerun()
+    # Absences are tracked on the rota itself — no manual marker here.
+    # Annual leave / unplanned absence flow in via Pull rota / 🔁 Sync rota.
 
 
 elif page == "📡 Live Rota":
