@@ -94,7 +94,7 @@ h2, h3 {
 import generate_rota as gr
 from generate_rota import (
     ALL_TLS, ALL_AGENTS, DAY_NAMES, ABSENCE_ROLES,
-    ROLE_PHONES, ROLE_TRIAGE, ROLE_TRIAGE_LC, ROLE_CHASING, ROLE_ICS,
+    ROLE_PHONES, ROLE_TRIAGE, ROLE_TRIAGE_LC, ROLE_TRIAGE_VC, ROLE_CHASING, ROLE_ICS,
     ROLE_TL, ROLE_AL, ROLE_ABSENCE, ROLE_NWD, ROLE_TRAINING,
     base_role, build_people, generate_lunch_rota,
     suggest_cover, build_dashboard_data,
@@ -590,6 +590,7 @@ ROLE_CSS = {
     ROLE_PHONES:    "background-color: #cce4ff" + _DARK_TEXT,
     ROLE_TRIAGE:    "background-color: #d8ffd8" + _DARK_TEXT,
     ROLE_TRIAGE_LC: "background-color: #f2f2b2" + _DARK_TEXT,
+    ROLE_TRIAGE_VC: "background-color: #d8f0e0" + _DARK_TEXT,
     ROLE_CHASING:   "background-color: #ffe5cc" + _DARK_TEXT,
     ROLE_ICS:       "background-color: #e5d8ff" + _DARK_TEXT,
     ROLE_TL:        "background-color: #d8d8d8" + _DARK_TEXT,
@@ -808,6 +809,7 @@ def build_slack_message(assignments, day_idx, lunch_rota=None,
         ("📞 Phones", ROLE_PHONES, True),
         ("📋 Triage", ROLE_TRIAGE, False),
         ("🔔 Triage + Lender Chasing", ROLE_TRIAGE_LC, False),
+        ("📹 Triage + Video Calls", ROLE_TRIAGE_VC, False),
         ("📞 Chasing", ROLE_CHASING, False),
         ("📁 Case Setup", ROLE_ICS, False),
     ]
