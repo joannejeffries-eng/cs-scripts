@@ -693,13 +693,231 @@ def detect_timeline_gaps(events_by_person, friday, exclusions_by_person=None,
     return out
 
 
-def suggest_quality_timeline(pw, gaps=None):
+# ── Cody edit compliance ────────────────────────────────────────────────────
+# Every Cody email edit must be fed back in #cody-email-triage-feedback — a
+# CS-wide rule (feedback_cody_feedback_mandatory). The quality check flags
+# anyone who made substantive edits but posted no feedback that week.
+CODY_FEEDBACK_CHANNEL = 'C09LDEKS2SE'   # #cody-email-triage-feedback
+
+# difflib ratio bands (normalised draft vs sent):
+#   ≥ 0.95     → sent as-is (no edit)
+#   0.55–0.95  → substantive edit
+#   < 0.55     → wrote their own
+_CODY_ASIS_RATIO = 0.95
+_CODY_EDIT_FLOOR = 0.55
+
+
+def _normalise_email(text):
+    """Strip greeting, sign-off/signature and quoted reply, lowercase, collapse
+    whitespace — so a difflib compare reflects substance, not boilerplate."""
+    import re
+    if not text:
+        return ''
+    greeting_re = re.compile(
+        r'^(hi|hello|hey|dear|good (?:morning|afternoon|evening))\b[^.!?]{0,40}?[,:]\s*',
+        re.I)
+    out = []
+    for ln in text.replace('\r\n', '\n').split('\n'):
+        s = ln.strip()
+        if not s:
+            continue
+        low = s.lower()
+        if s.startswith('>'):
+            continue
+        if low.startswith('on ') and 'wrote:' in low:
+            break  # quoted thread
+        if low.rstrip('.,!') in (
+            'best wishes', 'kind regards', 'kindest regards', 'many thanks',
+            'thanks', 'thank you', 'regards', 'best', 'warm regards',
+            'all the best', 'speak soon', 'cheers',
+        ):
+            break  # sign-off / signature
+        if not out:
+            # strip a leading greeting *prefix* (keep the rest of the line,
+            # since drafts often put greeting + body on one line)
+            g = greeting_re.match(s)
+            if g:
+                s = s[g.end():].strip()
+                if not s:
+                    continue
+        out.append(s)
+    return re.sub(r'\s+', ' ', ' '.join(out)).strip().lower()
+
+
+def _classify_cody_edit(draft, sent):
+    """Return 'as_is' | 'edited' | 'wrote_own' for a draft/sent pair."""
+    import difflib
+    nd, ns = _normalise_email(draft), _normalise_email(sent)
+    if not nd or not ns:
+        return 'wrote_own'
+    ratio = difflib.SequenceMatcher(None, nd, ns).ratio()
+    if ratio >= _CODY_ASIS_RATIO:
+        return 'as_is'
+    if ratio >= _CODY_EDIT_FLOOR:
+        return 'edited'
+    return 'wrote_own'
+
+
+# Verified query (built + run live by the data-analyst): one row per email where
+# Cody drafted a reply and the CS person sent one. Sent body is the matching
+# outbound inbox_activity row within ±5 min of first_replied_at.
+_CODY_PAIRS_SQL = """
+WITH staff AS (
+  SELECT DISTINCT ON (front_id) front_id, first_name, last_name
+  FROM staff_member WHERE front_id IS NOT NULL
+  ORDER BY front_id, (LENGTH(username) - LENGTH(REPLACE(username, '.', ''))) ASC
+),
+cody AS (
+  SELECT ia.message_id, ia.conversation_id, ia.first_replied_at, ia.first_replied_by,
+    (etr.created_by_integration_event_details::jsonb
+       -> 'payload' -> 'agent_response_data' ->> 'response_to_email') AS draft_text
+  FROM email_triage_result etr
+  JOIN inbox_activity ia ON etr.inbox_activity_id = ia.message_id
+  WHERE etr.is_main_agent IS TRUE AND NOT etr.is_error
+    AND (etr.created_by_integration_event_details::jsonb
+         -> 'payload' -> 'agent_response_data' ->> 'action_to_take') = 'reply_to_email'
+    AND COALESCE(etr.created_by_integration_event_details::jsonb
+         -> 'payload' -> 'agent_response_data' ->> 'response_to_email', '') <> ''
+    AND ia.is_inbound IS TRUE
+    AND ia.first_replied_at >= %s AND ia.first_replied_at < %s
+),
+sent AS (
+  SELECT DISTINCT ON (cody.message_id) cody.message_id, o.text AS sent_text
+  FROM cody
+  JOIN inbox_activity o ON o.conversation_id = cody.conversation_id
+    AND o.is_inbound IS FALSE
+    AND ABS(EXTRACT(EPOCH FROM (o.received_at - cody.first_replied_at))) <= 300
+  ORDER BY cody.message_id,
+           ABS(EXTRACT(EPOCH FROM (o.received_at - cody.first_replied_at))) ASC
+)
+SELECT s.first_name, s.last_name, cody.draft_text, sent.sent_text
+FROM cody
+JOIN sent ON sent.message_id = cody.message_id
+LEFT JOIN staff s ON s.front_id = cody.first_replied_by
+WHERE sent.sent_text IS NOT NULL
+"""
+
+
+def _resolve_slack_user_first_name(user_id, token, cache):
+    """Slack user ID → CS first name (via users.info, cached). None if not CS."""
+    if user_id in cache:
+        return cache[user_id]
+    import requests
+    first = None
+    try:
+        r = requests.get('https://slack.com/api/users.info',
+                         headers={'Authorization': f'Bearer {token}'},
+                         params={'user': user_id}, timeout=15)
+        data = r.json()
+        if data.get('ok'):
+            prof = data['user'].get('profile', {})
+            cand = prof.get('first_name') or (data['user'].get('real_name') or '').split(' ')[0]
+            cand = (cand or '').strip().capitalize()
+            if cand in DB_NAMES:
+                first = cand
+    except Exception as e:
+        logging.warning(f"users.info failed for {user_id}: {e}")
+    cache[user_id] = first
+    return first
+
+
+def _count_cody_feedback_posts(friday):
+    """Count #cody-email-triage-feedback posts per CS first name for the week.
+
+    The feedback bot posts end with `Feedback from <@U…>` (a bare Slack user
+    ID — no handle), so we extract the ID and resolve it to a name via
+    users.info."""
+    import re
+    import requests
+    from compat import get_slack_token
+
+    dates = get_weekday_dates(friday)
+    oldest = datetime.combine(min(dates), dtime(0, 0)).timestamp()
+    latest = datetime.combine(max(dates) + timedelta(days=1), dtime(0, 0)).timestamp()
+
+    counts = defaultdict(int)
+    user_re = re.compile(r'feedback from <@([UW][A-Z0-9]+)(?:\|[^>]+)?>', re.I)
+    token = get_slack_token()
+    name_cache = {}
+    cursor = None
+    try:
+        for _ in range(20):  # page-cap safety
+            params = {'channel': CODY_FEEDBACK_CHANNEL, 'oldest': oldest,
+                      'latest': latest, 'limit': 200}
+            if cursor:
+                params['cursor'] = cursor
+            r = requests.get('https://slack.com/api/conversations.history',
+                             headers={'Authorization': f'Bearer {token}'},
+                             params=params, timeout=20)
+            data = r.json()
+            if not data.get('ok'):
+                logging.warning(f"cody feedback history failed: {data.get('error')}")
+                break
+            for msg in data.get('messages', []):
+                m = user_re.search(msg.get('text', '') or '')
+                if not m:
+                    continue
+                first = _resolve_slack_user_first_name(m.group(1), token, name_cache)
+                if first:
+                    counts[first] += 1
+            cursor = data.get('response_metadata', {}).get('next_cursor')
+            if not cursor:
+                break
+    except Exception as e:
+        logging.warning(f"cody feedback count failed: {e}")
+    return dict(counts)
+
+
+def pull_cody_compliance(friday):
+    """Per-person Cody edit compliance for the reward week.
+
+    Fetches every email where Cody drafted a reply and the person sent one,
+    classifies each draft/sent pair (as-is / edited / wrote-own) via difflib,
+    and counts the person's posts in #cody-email-triage-feedback.
+
+    Returns {first_name: {'edits': n, 'as_is': n, 'wrote_own': n, 'posts': n}}.
+    """
+    from compat import get_postgres_url
+
+    dates = get_weekday_dates(friday)
+    start = min(dates)
+    end = max(dates) + timedelta(days=1)
+
+    out = defaultdict(lambda: {'edits': 0, 'as_is': 0, 'wrote_own': 0, 'posts': 0})
+
+    try:
+        conn = _connect_postgres(get_postgres_url())
+        cur = conn.cursor()
+        cur.execute(_CODY_PAIRS_SQL, (start, end))
+        for first_name, last_name, draft, sent in cur.fetchall():
+            full = f"{first_name} {last_name}" if first_name and last_name else ''
+            first = FIRST_NAMES.get(full)
+            if not first:
+                continue  # non-CS / unmapped replier
+            kind = _classify_cody_edit(draft, sent)
+            key = 'as_is' if kind == 'as_is' else 'wrote_own' if kind == 'wrote_own' else 'edits'
+            out[first][key] += 1
+        conn.close()
+    except CloudDBUnreachableError:
+        raise
+    except Exception as e:
+        logging.warning(f"pull_cody_compliance query failed: {e}")
+
+    for first, n in _count_cody_feedback_posts(friday).items():
+        out[first]['posts'] = n
+
+    return dict(out)
+
+
+def suggest_quality_timeline(pw, gaps=None, cody=None):
     """Compute suggested quality_ok / timeline_ok + human-readable reasons.
 
-    Quality (Phase 1 = archive ratio): every single-role triage day must hit
-    the base archive ratio (0.85). Split triage days are skipped — the ratio
-    can't be cleanly attributed to the triage portion. If there are no
-    assessable triage days, quality passes with a note.
+    Quality = two signals, both must pass:
+      1. Archive ratio — every single-role triage day must hit the base ratio
+         (0.85). Split triage days are skipped (ratio not cleanly attributable).
+      2. Cody compliance — if `cody` is given ({'edits','as_is','wrote_own',
+         'posts'}), flag when the person made substantive Cody edits but posted
+         no feedback in #cody-email-triage-feedback (mandatory CS rule).
 
     Timeline: pass if no unexplained gaps; otherwise flag for review with a
     short sample of the gaps.
@@ -708,7 +926,7 @@ def suggest_quality_timeline(pw, gaps=None):
     """
     gaps = gaps or []
 
-    # ── Quality: archive ratio on assessable (single-role) triage days ──
+    # ── Quality signal 1: archive ratio on assessable (single-role) triage days ──
     triage_days = [
         (d, dr) for d, dr in sorted(pw.days.items())
         if dr.is_working and not dr.segments
@@ -717,18 +935,33 @@ def suggest_quality_timeline(pw, gaps=None):
     below = [(d, dr) for d, dr in triage_days
              if dr.archive_ratio < TRIAGE_ARCHIVE_RATIO_BASE]
     if not triage_days:
-        q_suggested = True
-        q_reason = 'No triage days to assess on archive ratio'
+        archive_ok, archive_msg = True, 'no triage days'
     elif below:
         days_str = ', '.join(d.strftime('%a') for d, _ in below)
         lowest = min(dr.archive_ratio for _, dr in below)
-        q_suggested = False
-        q_reason = (f'Archive ratio below 85% on {days_str} '
-                    f'(lowest {lowest * 100:.0f}%)')
+        archive_ok = False
+        archive_msg = f'archive <85% on {days_str} (low {lowest * 100:.0f}%)'
     else:
         avg = sum(dr.archive_ratio for _, dr in triage_days) / len(triage_days)
-        q_suggested = True
-        q_reason = f'Archive ratio OK (avg {avg * 100:.0f}%)'
+        archive_ok = True
+        archive_msg = f'archive OK ({avg * 100:.0f}%)'
+
+    # ── Quality signal 2: Cody edit-feedback compliance ──
+    cody_ok, cody_msg = True, ''
+    if cody is not None:
+        edits = cody.get('edits', 0)
+        posts = cody.get('posts', 0)
+        if edits > 0 and posts == 0:
+            cody_ok = False
+            cody_msg = f'{edits} Cody edit(s), 0 feedback posts'
+        elif edits > 0:
+            cody_msg = f'Cody {posts} post(s) for {edits} edit(s)'
+        else:
+            cody_msg = 'no Cody edits'
+
+    q_suggested = archive_ok and cody_ok
+    parts = [archive_msg] + ([cody_msg] if cody_msg else [])
+    q_reason = ' · '.join(p for p in parts if p)
 
     # ── Timeline: unexplained gaps ──
     # All gaps > 10 min are listed for review; only a substantial block
@@ -772,12 +1005,23 @@ def run_quality_timeline_checks(week_data, friday, exclusions_by_person=None):
     events = pull_activity_events(friday)
     gaps_by_person = detect_timeline_gaps(events, friday, exclusions_by_person)
 
+    # Cody compliance is a best-effort second quality signal — don't let a
+    # failure (Slack/DB hiccup) block the timeline + archive-ratio checks.
+    try:
+        cody_by_person = pull_cody_compliance(friday)
+    except CloudDBUnreachableError:
+        raise
+    except Exception as e:
+        logging.warning(f"cody compliance skipped: {e}")
+        cody_by_person = {}
+
     summary = []
     for name, pw in week_data.items():
         if pw.days_worked == 0:
             continue
         gaps = gaps_by_person.get(name, [])
-        q_sug, q_reason, t_sug, t_reason = suggest_quality_timeline(pw, gaps)
+        cody = cody_by_person.get(name)
+        q_sug, q_reason, t_sug, t_reason = suggest_quality_timeline(pw, gaps, cody)
 
         # Apply without clobbering a manual override.
         if pw.quality_suggested is None or pw.quality_ok == pw.quality_suggested:
