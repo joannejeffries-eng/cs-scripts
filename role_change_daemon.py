@@ -62,8 +62,9 @@ LOG_FILE = STATE_DIR / 'daemon.log'
 
 ANCHOR_HEADER = "📋 Role changes for {day_label} — please post any moves in this thread."
 ANCHOR_HELP = ("Format: `Maisha to triage` or `Maisha to triage 10:30-12` "
-                "or `Maisha back`. Post `clear all` to wipe today's moves "
-                "and start over.")
+                "or `Maisha back`. Roles: phones, triage, ics, chasing, t+lc, "
+                "training, leave. (e.g. `Cris to training 9-10`, "
+                "`Tara to leave 1-5`.) Post `clear all` to wipe today's moves.")
 
 
 # ── Slack helpers ───────────────────────────────────────────────────────────
@@ -281,7 +282,7 @@ def poll_once(today: date, last_seen: str, anchor_ts: str) -> str:
                 channel, anchor_ts,
                 f"❌ Couldn't parse <@{noted_by}>'s message. "
                 f"Try `Name to role` or `Name back`. "
-                f"Roles: phones, triage, ics, chasing, t+lc."
+                f"Roles: phones, triage, ics, chasing, t+lc, training, leave."
             )
             last_seen = ts
             _write_last_seen(last_seen)
