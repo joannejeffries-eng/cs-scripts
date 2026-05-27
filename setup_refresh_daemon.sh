@@ -1,15 +1,17 @@
 #!/bin/bash
 # One-time setup for the CS launchd agents.
 #
-# Four agents get installed:
-#   1. com.juno.cs-refresh-daemon       — pulls Looker actuals on demand (Slack-triggered)
-#   2. com.juno.cs-role-change-daemon   — captures TL-posted role moves (Slack-triggered)
-#   3. com.juno.cs-daily-actuals        — weekday auto-pull at 4 points per day
-#   4. com.juno.cs-rota-app             — Streamlit rota app on http://localhost:8501
+# Five agents get installed:
+#   1. com.juno.cs-refresh-daemon          — pulls Looker actuals on demand (Slack-triggered)
+#   2. com.juno.cs-role-change-daemon      — captures TL-posted role moves (Slack-triggered)
+#   3. com.juno.cs-daily-actuals           — weekday auto-pull at 4 points per day
+#   4. com.juno.cs-rota-app                — Streamlit rota app on http://localhost:8501
+#   5. com.juno.cs-quality-timeline-checks — Thu 18:30 reward quality+timeline checks
 #
 # Long-running services (1, 2, 4) auto-start at every login and restart on crash.
-# The auto-pull (3) fires Mon–Fri at 06:00, 11:00, 13:30 and 15:30
-# (catches up on wake if missed).
+# The auto-pull (3) fires Mon–Fri at 06:00, 11:00, 13:30 and 15:30.
+# The Thu checks (5) fire Thursday 18:30 (end of the Fri→Thu reward week).
+# Single-shot crons (3, 5) catch up on wake if missed.
 #
 # What this does:
 #   - Writes your $STAFF_APP_LOOKER_POSTGRES_URL to a file the daemons
@@ -37,12 +39,14 @@ DAEMONS=(
   "com.juno.cs-role-change-daemon"
   "com.juno.cs-daily-actuals"
   "com.juno.cs-rota-app"
+  "com.juno.cs-quality-timeline-checks"
 )
 
 LOG_DIRS=(
   "$HOME/.claude/scheduled-tasks/refresh-daemon"
   "$HOME/.claude/scheduled-tasks/role-changes"
   "$HOME/.claude/scheduled-tasks/rota-app"
+  "$HOME/.claude/scheduled-tasks/quality-timeline"
 )
 
 # ── 1. Save Postgres URL to a file the refresh daemon can read ────────────
@@ -121,10 +125,14 @@ echo "                   will move back to #client-support-leads)"
 echo "  • Auto-pull:     launchctl kickstart -k gui/\$(id -u)/com.juno.cs-daily-actuals"
 echo "                   (forces an immediate run; otherwise fires Mon–Fri at"
 echo "                   06:00, 11:00, 13:30 and 15:30)"
+echo "  • Thu checks:    launchctl kickstart -k gui/\$(id -u)/com.juno.cs-quality-timeline-checks"
+echo "                   (forces an immediate run; otherwise fires Thursday 18:30 —"
+echo "                   DMs Jo the quality+timeline review summary)"
 echo ""
 echo "Logs:"
 echo "  tail -f ~/.claude/scheduled-tasks/refresh-daemon/daemon.log"
 echo "  tail -f ~/.claude/scheduled-tasks/role-changes/daemon.log"
+echo "  tail -f ~/.claude/scheduled-tasks/quality-timeline/checks.log"
 echo ""
 echo "To stop / uninstall later:"
 for label in "${DAEMONS[@]}"; do
