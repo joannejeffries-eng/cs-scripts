@@ -347,13 +347,38 @@ def apply_move(d: date, move: dict, rota_assignments: dict | None = None) -> dic
         save_moves(d, moves)
         return target
 
-    # 'move' — append new
+    # 'move' — append, but auto-supersede an existing move with the same
+    # person + same start_time + same end_time. This handles the "I typed
+    # the wrong role, let me re-log it" workflow without forcing the user
+    # to post 'back' first (e.g. an early "Tara to T+VC 7-11:30" followed
+    # by "Tara to ICS 7-11:30" should replace, not double up).
     from_role = ''
     if rota_assignments:
         day_idx = d.weekday()
         from_role = rota_assignments.get(name, {}).get(day_idx, '') or ''
     move['from_role'] = from_role
-    moves.append(move)
+
+    new_start = move.get('start_time')
+    new_end = move.get('end_time')
+    supersede_idx = None
+    for i, existing in enumerate(moves):
+        if existing.get('action') != 'move':
+            continue
+        if existing.get('name') != name:
+            continue
+        if existing.get('start_time') != new_start:
+            continue
+        if existing.get('end_time') != new_end:
+            continue
+        supersede_idx = i
+        break
+
+    if supersede_idx is not None:
+        move['supersedes_message_ts'] = moves[supersede_idx].get('message_ts')
+        moves[supersede_idx] = move
+    else:
+        moves.append(move)
+
     save_moves(d, moves)
     return move
 
