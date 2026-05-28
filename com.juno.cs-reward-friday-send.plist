@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.juno.cs-reward-friday-send</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Library/Developer/CommandLineTools/usr/bin/python3</string>
+    <string>/Users/joannejeffries/Documents/GitHub/cs-scripts/reward_time_friday_send.py</string>
+    <string>run</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/joannejeffries/Documents/GitHub/cs-scripts</string>
+
+  <!-- Friday 13:00 — reads timeline-check state + authorisation, runs the
+       queue queries, posts (or holds) the reward message. launchd reschedules
+       for next Friday. Weekday=5 = Friday. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key><integer>5</integer>
+    <key>Hour</key><integer>13</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+  <key>KeepAlive</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/joannejeffries/.juno/scheduled-tasks/reward-time-friday/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/joannejeffries/.juno/scheduled-tasks/reward-time-friday/launchd.err.log</string>
+</dict>
+</plist>
