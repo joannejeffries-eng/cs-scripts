@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.juno.cs-timeline-checks</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Library/Developer/CommandLineTools/usr/bin/python3</string>
+    <string>/Users/joannejeffries/Documents/GitHub/cs-scripts/timeline_checks.py</string>
+    <string>run-friday</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/joannejeffries/Documents/GitHub/cs-scripts</string>
+
+  <!-- Friday 09:00 — posts the three TL parent messages and then watches
+       for ✅ reactions every 60s until 11:30 (process exits on its own).
+       launchd reschedules for next Friday. Weekday=5 = Friday. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key><integer>5</integer>
+    <key>Hour</key><integer>9</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+  <key>KeepAlive</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/joannejeffries/.juno/scheduled-tasks/timeline-checks/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/joannejeffries/.juno/scheduled-tasks/timeline-checks/launchd.err.log</string>
+</dict>
+</plist>
