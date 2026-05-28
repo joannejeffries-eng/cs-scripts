@@ -957,19 +957,6 @@ with st.sidebar:
         st.caption(f"Adjusted to Monday: {selected_monday.strftime('%d %b %Y')}")
 
     st.divider()
-    st.caption("**Cover notifications**")
-    dms_live = st.toggle(
-        "Post to pegasus channels for real",
-        value=st.session_state.get('cover_dm_live', False),
-        key='cover_dm_live',
-        help="Off (default) = posts a preview to #dry-run-testing-jo. On = posts to each cover person's #pegasus-<tl> channel with an @mention.",
-    )
-    if dms_live:
-        st.caption("⚠️ Live — posts go to #pegasus-jess / #pegasus-yasmin / #pegasus-courtney with @mentions.")
-    else:
-        st.caption("🧪 Dry-run — previews go to your dry-run channel.")
-
-    st.divider()
     st.caption("**Linked sheets**")
     st.caption(
         "📋 [Rota Sheet](https://docs.google.com/spreadsheets/d/1CMSEZSb-4D4mO6iPb8tVSaAPsZT5KZst9VSXH4bpi0Y)"
@@ -1345,7 +1332,6 @@ elif page == "💬 Morning Message":
 
             day_label = f"{DAY_NAMES[di]} {day_date.strftime('%d/%m')}"
             cover_items = build_cover_notifications(di, day_label, phone_cover, daily_notes)
-            dms_live = st.session_state.get('cover_dm_live', False)
 
             # ── Schedule for 07:30 in #cs-zone ─────────────────────────────
             with st.container(border=True):
@@ -1420,8 +1406,8 @@ elif page == "💬 Morning Message":
                         except Exception as e:
                             st.error(f"Schedule failed: {e}")
 
-            # ── Other actions ──
-            action_cols = st.columns(3)
+            # ── Morning message actions ──
+            action_cols = st.columns(2)
             with action_cols[0]:
                 if st.button(f"📤 Send now (dry-run)", key=f"send_{di}"):
                     try:
@@ -1438,27 +1424,46 @@ elif page == "💬 Morning Message":
                     st.session_state.pop(msg_key, None)
                     st.session_state.pop(auto_key, None)
                     st.rerun()
-            with action_cols[2]:
-                if cover_items:
-                    btn_label = (
-                        f"📣 Notify cover ({len(cover_items)}) "
-                        f"— {'LIVE' if dms_live else 'dry-run'}"
+
+            # ── Cover notifications ──
+            if cover_items:
+                with st.container(border=True):
+                    st.markdown(f"**📣 Cover notifications ({len(cover_items)})**")
+                    st.caption(
+                        "Posts a cover line into each TL's #pegasus channel for "
+                        "the people picking up cover. Preview goes to "
+                        "#dry-run-testing-jo with mentions stripped."
                     )
-                    if st.button(btn_label, key=f"notify_cover_{di}",
-                                 type='primary' if dms_live else 'secondary'):
-                        with st.spinner('Posting cover notifications…'):
-                            results = send_cover_notifications(
-                                cover_items, day_label, dry_run=not dms_live
-                            )
-                        for name, channel_label, ok, err in results:
-                            if ok:
-                                tag = (f'✅ posted to {channel_label}' if dms_live
-                                        else f'✅ dry-run preview for {channel_label}')
-                                st.success(f"{tag} — {name}")
-                            else:
-                                st.error(f"❌ {name} ({channel_label}): {err}")
-                else:
-                    st.button("📣 No cover today", key=f"notify_cover_{di}", disabled=True)
+                    cover_cols = st.columns(2)
+                    with cover_cols[0]:
+                        if st.button("🧪 Preview to dry-run",
+                                      key=f"cover_preview_{di}",
+                                      use_container_width=True):
+                            with st.spinner('Posting preview…'):
+                                results = send_cover_notifications(
+                                    cover_items, day_label, dry_run=True
+                                )
+                            for name, channel_label, ok, err in results:
+                                if ok:
+                                    st.success(f"✅ dry-run preview for {channel_label} — {name}")
+                                else:
+                                    st.error(f"❌ {name} ({channel_label}): {err}")
+                    with cover_cols[1]:
+                        if st.button("📤 Send to pegasus channels (LIVE)",
+                                      key=f"cover_send_{di}",
+                                      type='primary',
+                                      use_container_width=True):
+                            with st.spinner('Posting cover notifications…'):
+                                results = send_cover_notifications(
+                                    cover_items, day_label, dry_run=False
+                                )
+                            for name, channel_label, ok, err in results:
+                                if ok:
+                                    st.success(f"✅ posted to {channel_label} — {name}")
+                                else:
+                                    st.error(f"❌ {name} ({channel_label}): {err}")
+            else:
+                st.caption("📣 No cover needed for this day.")
 
 
 elif page == "🍽️ Lunch Rota":
