@@ -684,11 +684,14 @@ def select_phone_cover(assignments):
 
     Returns {day_idx: name} for days 0–4.
     """
-    # Role headroom priority — higher = more headroom, easier to pull from
+    # Role headroom priority — higher = more headroom, easier to pull from.
+    # Chasing is now target 1 / min 1, so there's no slack to pull from there;
+    # left at the bottom of the ranking but it'll only get picked if nothing
+    # else has headroom either.
     ROLE_HEADROOM = {
         ROLE_TRIAGE: 3,     # target 5, min 4 — most headroom
-        ROLE_CHASING: 2,    # target 3, min 2
-        ROLE_ICS: 1,        # target 2, min 1
+        ROLE_ICS: 2,        # target 2, min 1
+        ROLE_CHASING: 1,    # target 1, min 1 — pulling someone breaks cover
     }
 
     # Step 1: build per-day eligible candidates with their current role
