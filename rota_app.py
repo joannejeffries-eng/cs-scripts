@@ -919,16 +919,30 @@ with st.sidebar:
     st.title("📋 CS Rota Manager")
     st.divider()
 
-    page = st.radio("Navigation", [
-        "🗓️ Weekly Rota",
-        "📡 Live Rota",
-        "📊 Dashboard",
-        "💬 Morning Message",
-        "🍽️ Lunch Rota",
-        "🔍 Role Lookup",
-        "🏆 Reward Time",
-        "⚙️ Pull Rota",
-    ], label_visibility="collapsed")
+    page = st.radio(
+        "Navigation",
+        [
+            "🗓️ Weekly Rota",
+            "📡 Hourly view (who's where)",
+            "📊 Coverage",
+            "💬 Morning Message",
+            "🍽️ Lunch Rota",
+            "🔍 Role Lookup",
+            "🏆 Reward Time",
+            "⚙️ Pull Rota",
+        ],
+        captions=[
+            "Read-only view of the planned week",
+            "Read-only view with today's intraday moves overlaid",
+            "Read-only view of cover gaps and suggestions",
+            "Sends the 07:30 post and writes reward time into next week's rota",
+            "Read-only view of the lunch cover plan",
+            "Read-only lookup of historic roles",
+            "Decides reward time and writes bookings into the rota",
+            "Read-only loader, refreshes a week from the rota sheet",
+        ],
+        label_visibility="collapsed",
+    )
 
     st.divider()
     today = date.today()
@@ -1045,9 +1059,9 @@ if page == "🗓️ Weekly Rota":
     # Annual leave / unplanned absence flow in via Pull rota / 🔁 Sync rota.
 
 
-elif page == "📡 Live Rota":
+elif page == "📡 Hourly view (who's where)":
     import role_changes as _rc
-    st.header("📡 Live Rota")
+    st.header("📡 Hourly view (who's where)")
     st.caption(
         "Roles as actually happening — overlays mid-day moves captured "
         "from #dry-run-testing-jo on top of the planned rota "
@@ -1105,8 +1119,8 @@ elif page == "📡 Live Rota":
         st.caption("No moves captured for this day yet.")
 
 
-elif page == "📊 Dashboard":
-    st.header(f"Dashboard — w/c {selected_monday.strftime('%d %b %Y')}")
+elif page == "📊 Coverage":
+    st.header(f"Coverage — w/c {selected_monday.strftime('%d %b %Y')}")
 
     if assignments is None:
         st.info("No rota found for this week. Go to **Pull Rota** to load it.")
