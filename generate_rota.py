@@ -133,7 +133,7 @@ DEFAULT_ROLE_TARGETS = [
     RoleTarget(ROLE_PHONES, 5, 4, True, ROLE_PHONES),
     RoleTarget(ROLE_TRIAGE, 5, 4, False, ROLE_TRIAGE),
     RoleTarget(ROLE_TRIAGE_LC, 1, 1, True, ROLE_TRIAGE_LC),
-    RoleTarget(ROLE_CHASING, 3, 2, False, ROLE_CHASING),
+    RoleTarget(ROLE_CHASING, 1, 1, False, ROLE_CHASING),
     RoleTarget(ROLE_ICS, 2, 1, False, ROLE_ICS),
     RoleTarget(ROLE_TL, 1, 1, False, ROLE_TL),
     # Singleton roles fulfilled as phone secondaries or standalone:
