@@ -589,18 +589,20 @@ def send_cover_dms(dms, dry_run=True):
 
 # ── Colours ────────────────────────────────────────────────────────────────
 _DARK_TEXT = "; color: #1a1a1a"
+REWARD_TIME_LABEL = "Reward time"
 ROLE_CSS = {
-    ROLE_PHONES:    "background-color: #cce4ff" + _DARK_TEXT,
-    ROLE_TRIAGE:    "background-color: #d8ffd8" + _DARK_TEXT,
-    ROLE_TRIAGE_LC: "background-color: #f2f2b2" + _DARK_TEXT,
-    ROLE_TRIAGE_VC: "background-color: #d8f0e0" + _DARK_TEXT,
-    ROLE_CHASING:   "background-color: #ffe5cc" + _DARK_TEXT,
-    ROLE_ICS:       "background-color: #e5d8ff" + _DARK_TEXT,
-    ROLE_TL:        "background-color: #d8d8d8" + _DARK_TEXT,
-    ROLE_AL:        "background-color: #ffcccc" + _DARK_TEXT,
-    ROLE_ABSENCE:   "background-color: #ffb2b2" + _DARK_TEXT,
-    ROLE_NWD:       "background-color: #e5e5e5" + _DARK_TEXT,
-    ROLE_TRAINING:  "background-color: #ccffff" + _DARK_TEXT,
+    ROLE_PHONES:        "background-color: #cce4ff" + _DARK_TEXT,
+    ROLE_TRIAGE:        "background-color: #d8ffd8" + _DARK_TEXT,
+    ROLE_TRIAGE_LC:     "background-color: #f2f2b2" + _DARK_TEXT,
+    ROLE_TRIAGE_VC:     "background-color: #d8f0e0" + _DARK_TEXT,
+    ROLE_CHASING:       "background-color: #ffe5cc" + _DARK_TEXT,
+    ROLE_ICS:           "background-color: #e5d8ff" + _DARK_TEXT,
+    ROLE_TL:            "background-color: #d8d8d8" + _DARK_TEXT,
+    ROLE_AL:            "background-color: #ffcccc" + _DARK_TEXT,
+    ROLE_ABSENCE:       "background-color: #ffb2b2" + _DARK_TEXT,
+    ROLE_NWD:           "background-color: #e5e5e5" + _DARK_TEXT,
+    ROLE_TRAINING:      "background-color: #ccffff" + _DARK_TEXT,
+    REWARD_TIME_LABEL:  "background-color: #fff2b3; font-weight: 600" + _DARK_TEXT,
 }
 
 
@@ -998,6 +1000,93 @@ assignments = st.session_state.get(f"assignments_{week_key}")
 phone_agents = st.session_state.get(f"phone_agents_{week_key}")
 
 
+# ── Hourly-view helpers ────────────────────────────────────────────────────
+# Used by the "Hourly view (who's where)" page to overlay reward-time blocks
+# from Daily Notes onto the per-hour grid.
+
+def _parse_hour_string(s: str):
+    """'13:30' → 13.5, '2pm' → 14.0, '9' → 9.0. None if not parseable."""
+    import re as _re
+    if not s:
+        return None
+    raw = s.strip().lower()
+    pm = raw.endswith("pm")
+    am = raw.endswith("am")
+    if pm or am:
+        raw = raw[:-2].strip()
+    m = _re.match(r"^(\d{1,2})(?::(\d{2}))?$", raw)
+    if not m:
+        return None
+    h = int(m.group(1))
+    mn = int(m.group(2)) if m.group(2) else 0
+    if pm and h < 12:
+        h += 12
+    elif am and h == 12:
+        h = 0
+    return h + mn / 60.0
+
+
+def _parse_time_range_start_end(s: str):
+    """'13:00 - 17:00' → (13.0, 17.0). None if not parseable.
+
+    Mirrors the meridian inference in reward_time.parse_time_range_hours.
+    """
+    import re as _re
+    if not s:
+        return None
+    parts = _re.split(r"\s*[-–]\s*", s.strip(), maxsplit=1)
+    if len(parts) != 2:
+        return None
+    raw_a, raw_b = parts[0].strip().lower(), parts[1].strip().lower()
+    a = _parse_hour_string(raw_a)
+    b = _parse_hour_string(raw_b)
+    if a is None or b is None:
+        return None
+    a_mer = raw_a.endswith("am") or raw_a.endswith("pm")
+    b_mer = raw_b.endswith("am") or raw_b.endswith("pm")
+    if not a_mer and not b_mer:
+        if a < 8 and b < 8:
+            a += 12
+            b += 12
+        elif b < a:
+            b += 12
+    elif b_mer and not a_mer:
+        if a < 12 and (a + 12) < b:
+            a += 12
+    if b <= a:
+        return None
+    return a, b
+
+
+def reward_blocks_for_day(daily_notes_for_day):
+    """Return {name: set(int_hours)} for every Daily Notes entry on the day
+    that mentions 'reward time'. Hour buckets match the columns in
+    build_live_rota_df (8..17 inclusive).
+    """
+    import math as _math
+    if not daily_notes_for_day:
+        return {}
+    out: dict[str, set[int]] = {}
+    for entry in daily_notes_for_day:
+        name = entry.get("name", "").strip()
+        if not name:
+            continue
+        haystack = (entry.get("role", "") + " " + entry.get("note", "")).lower()
+        if "reward time" not in haystack:
+            continue
+        rng = _parse_time_range_start_end(entry.get("time", ""))
+        if rng is None:
+            continue
+        start, end = rng
+        # Slot 'HH:00' covers HH:00 → HH+1:00. A reward block 13:30–17:00 covers
+        # slots 13, 14, 15, 16 (the partial 13 slot is still flagged for
+        # visibility — better to overshow by a partial hour than miss it).
+        for h in range(int(_math.floor(start)), int(_math.ceil(end))):
+            if 8 <= h < 18:
+                out.setdefault(name, set()).add(h)
+    return out
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # PAGES
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1083,6 +1172,28 @@ elif page == "📡 Hourly view (who's where)":
     moves = _rc.load_moves(picked_day)
 
     df = _rc.build_live_rota_df(picked_day, live_assignments, moves)
+
+    # Overlay reward-time blocks from Daily Notes onto the hour grid.
+    # Failure to read Daily Notes is non-fatal — we just skip the overlay.
+    reward_blocks: dict[str, set[int]] = {}
+    try:
+        gc_dn = _cached_gspread()
+        dn_week = read_daily_notes(gc_dn, picked_monday)
+        day_idx = picked_day.weekday()
+        if day_idx <= 4:
+            reward_blocks = reward_blocks_for_day(dn_week.get(day_idx, []))
+    except Exception:
+        reward_blocks = {}
+
+    if reward_blocks and not df.empty:
+        for name, hours in reward_blocks.items():
+            if name not in df.index:
+                continue
+            for h in hours:
+                col = f"{h:02d}:00"
+                if col in df.columns:
+                    df.at[name, col] = REWARD_TIME_LABEL
+
     if df.empty:
         st.info("No working roles on this day.")
     else:
@@ -1091,6 +1202,9 @@ elif page == "📡 Hourly view (who's where)":
             use_container_width=True,
             height=min(60 + 35 * len(df), 700),
         )
+        if reward_blocks:
+            ppl = ", ".join(sorted(reward_blocks.keys()))
+            st.caption(f"🎁 On reward time today: {ppl}")
 
     if moves:
         st.subheader(f"Today's moves ({len(moves)})")
