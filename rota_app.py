@@ -102,7 +102,7 @@ from generate_rota import (
     read_original_rota, read_daily_notes, append_daily_notes_rows,
     read_working_hours, update_daily_notes_roles,
     DEFAULT_ROLE_TARGETS,
-    DEFAULT_SKILLS, DEFAULT_SHIFTS,
+    DEFAULT_SKILLS, DEFAULT_SHIFTS, DEFAULT_HOURS,
 )
 import reward_time as rt
 from reward_time import (
@@ -1058,6 +1058,45 @@ def _parse_time_range_start_end(s: str):
     return a, b
 
 
+def _hhmm_to_float(s: str):
+    """'10:30' → 10.5. None on bad input."""
+    if not s:
+        return None
+    try:
+        h, m = s.split(":")
+        return int(h) + int(m) / 60
+    except (ValueError, AttributeError):
+        return None
+
+
+def effective_shift_window(name, picked_day, moves):
+    """Effective (start_h, end_h) shift window for a person on picked_day.
+
+    Defaults to DEFAULT_SHIFTS[name]. If the day has a single bounded move
+    for this person whose duration matches DEFAULT_HOURS[name][day_idx]
+    within ~30 min, treat that as a shift-defining move (covers the part-
+    timer case where the move 07:00-11:30 IS today's whole shift, not just
+    a mid-day swap).
+    """
+    default = DEFAULT_SHIFTS.get(name, (8.0, 17.0))
+    day_idx = picked_day.weekday()
+    if day_idx > 4:
+        return default
+    daily_hours = (DEFAULT_HOURS.get(name) or {}).get(day_idx)
+    if not daily_hours:
+        return default
+    for m in moves:
+        if m.get("name") != name or m.get("action") != "move":
+            continue
+        s = _hhmm_to_float(m.get("start_time"))
+        e = _hhmm_to_float(m.get("end_time"))
+        if s is None or e is None:
+            continue
+        if abs((e - s) - daily_hours) <= 0.5:
+            return (s, e)
+    return default
+
+
 def reward_blocks_for_day(daily_notes_for_day):
     """Return {name: set(int_hours)} for every Daily Notes entry on the day
     that mentions 'reward time'. Hour buckets match the columns in
@@ -1171,15 +1210,49 @@ elif page == "📡 Hourly view (who's where)":
 
     moves = _rc.load_moves(picked_day)
 
-    df = _rc.build_live_rota_df(picked_day, live_assignments, moves)
+    # Compute each working person's effective shift window today, then size
+    # the hour grid to fit the earliest start and latest end (within 07-18).
+    import math as _math
+    shift_windows: dict[str, tuple[float, float]] = {}
+    day_idx = picked_day.weekday()
+    if day_idx <= 4 and live_assignments:
+        for name, days in live_assignments.items():
+            role = (days.get(day_idx) or "").strip()
+            if not role or role in (ROLE_NWD, ROLE_AL, ROLE_ABSENCE):
+                continue
+            shift_windows[name] = effective_shift_window(name, picked_day, moves)
+    if shift_windows:
+        starts = [s for s, _ in shift_windows.values()]
+        ends = [e for _, e in shift_windows.values()]
+        display_start = max(7, int(_math.floor(min(starts))))
+        display_end = min(19, int(_math.ceil(max(ends))))
+    else:
+        display_start, display_end = 8, 18
+    hours_range = list(range(display_start, display_end))
 
-    # Overlay reward-time blocks from Daily Notes onto the hour grid.
-    # Failure to read Daily Notes is non-fatal — we just skip the overlay.
+    df = _rc.build_live_rota_df(
+        picked_day, live_assignments, moves, hours=hours_range,
+    )
+
+    # Blank cells outside each person's shift window (so a part-timer
+    # finishing at 11:30 doesn't appear to be on their rota role at 14:00).
+    if not df.empty:
+        for name in df.index:
+            shift_s, shift_e = shift_windows.get(name, (display_start, display_end))
+            for h in hours_range:
+                # Slot 'HH:00' covers HH:00 → HH+1:00.
+                # In-shift if any part of the slot overlaps [shift_s, shift_e).
+                if (h + 1) <= shift_s or h >= shift_e:
+                    col = f"{h:02d}:00"
+                    if col in df.columns:
+                        df.at[name, col] = ""
+
+    # Overlay reward-time blocks from Daily Notes onto the hour grid (after
+    # the off-shift masking — reward time is part of the shift).
     reward_blocks: dict[str, set[int]] = {}
     try:
         gc_dn = _cached_gspread()
         dn_week = read_daily_notes(gc_dn, picked_monday)
-        day_idx = picked_day.weekday()
         if day_idx <= 4:
             reward_blocks = reward_blocks_for_day(dn_week.get(day_idx, []))
     except Exception:

@@ -425,19 +425,23 @@ def current_role_for(name: str, d: date, at_hhmm: str,
     return active or rota_role
 
 
-def build_live_rota_df(d: date, rota: dict, moves: list[dict]) -> pd.DataFrame:
-    """One column per hour-slot 8:00–18:00; one row per person. Each cell
-    shows the role the person is actually on during that hour.
+def build_live_rota_df(d: date, rota: dict, moves: list[dict],
+                         hours: list[int] | None = None) -> pd.DataFrame:
+    """One column per hour-slot; one row per person. Each cell shows the
+    role the person is actually on during that hour.
 
     rota: {name: {day_idx: role}} — full week, we pick the right day_idx
     automatically.
+    hours: optional list of hour ints (e.g. [7,8,9,10,11]). Defaults to
+    8 through 17 inclusive (the 17:00–18:00 slot is the last).
     """
     day_idx = d.weekday()
     if day_idx > 4:   # weekend
         return pd.DataFrame()
 
-    # Hour slots — 8 through 17 (inclusive of 17:00–18:00)
-    hours = list(range(8, 18))
+    # Hour slots — 8 through 17 (inclusive of 17:00–18:00) by default
+    if hours is None:
+        hours = list(range(8, 18))
     rows = []
     names = sorted(rota.keys())
     for name in names:
