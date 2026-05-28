@@ -2182,7 +2182,7 @@ elif page == "🏆 Reward Time":
     total_count = sum(1 for name in RT_AGENTS if week_data.get(name) and week_data[name].days_worked > 0)
     st.metric("Qualified", f"{qualified_count} / {total_count}")
 
-    col_summary, col_send_test, col_send_live = st.columns(3)
+    col_summary, col_send_test = st.columns(2)
     with col_summary:
         if st.button("💾 Save week summary to sheet", use_container_width=True):
             try:
@@ -2203,23 +2203,47 @@ elif page == "🏆 Reward Time":
             except Exception as e:
                 st.error(f"Failed: {e}")
 
-    with col_send_live:
-        send_help = (
-            "LIVE post — visible to everyone in the channel."
+    # ── Authorise reward time (replaces direct send button) ──
+    # Clicking Authorise saves a state file. At 13:00 a launchd job runs
+    # reward_time_friday_send.py which checks: authorisation + TL timelines
+    # ✅ + queue trigger (triage + ICS both ≤ 50). If everything aligns it
+    # posts the reward message. If queues fail the auth is one-shot — Jo has
+    # to re-authorise next week.
+    st.markdown("### Authorise reward time")
+    import reward_time_friday_send as rt_fri
+    existing_auth = rt_fri.load_authorisation(reward_friday)
+
+    if existing_auth is not None:
+        st.success(
+            f"✅ Authorised at **{existing_auth['authorised_at'][11:16]}** by "
+            f"{existing_auth['authorised_by']}. The post will fire at 13:00 if "
+            "both queues are ≤ 50. If they're over, the not-triggered message "
+            "goes out and authorisation clears (one-shot per week)."
+        )
+        if st.button("Cancel authorisation", key=f"cancel_auth_{reward_friday}"):
+            rt_fri.clear_authorisation(reward_friday)
+            st.rerun()
+    else:
+        auth_help = (
+            "Saves the week summary and authorises the 13:00 reward time post. "
+            "The post only fires if both queues hit the trigger (≤ 50)."
             if timelines_signed_off
             else "Blocked: TL timeline checks not yet complete (see banner above)."
         )
-        if st.button("📤 Send to #reward-time-questions-cs",
+        if st.button("✅ Authorise reward time",
                       type='primary', use_container_width=True,
                       disabled=not timelines_signed_off,
-                      help=send_help):
+                      help=auth_help):
             try:
                 write_week_summary(reward_friday, week_data)
-                msg = build_reward_message_by_team(reward_friday, week_data)
-                send_slack_message(SLACK_CHANNEL_REWARD_QUESTIONS, msg)
-                st.success("✅ Posted to #reward-time-questions-cs")
+                state = rt_fri.save_authorisation(reward_friday)
+                st.success(
+                    f"Authorised at {state['authorised_at'][11:16]}. "
+                    "Will fire at 13:00 if the queue trigger is met."
+                )
+                st.rerun()
             except Exception as e:
-                st.error(f"Failed: {e}")
+                st.error(f"Authorise failed: {e}")
 
     # Preview message — DELIBERATELY no `key=` so Streamlit re-reads `value=`
     # on every rerun (otherwise the textarea stays stuck on the first-render
