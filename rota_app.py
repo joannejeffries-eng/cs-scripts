@@ -2129,6 +2129,52 @@ elif page == "🏆 Reward Time":
     st.subheader("Friday Sign-off")
     st.caption("Review quality and timelines above, then send the results to team leads.")
 
+    # ── TL timeline-check status ──
+    # The Friday 09:00 launchd posts 3 parent messages in
+    # #reward-time-questions-cs, one per TL. Each per-person ✅ unblocks
+    # this Reward Time post.
+    import timeline_checks as tlc
+    try:
+        tlc_state = tlc.refresh_check_state(reward_friday)
+    except Exception:
+        tlc_state = tlc._load_state(reward_friday)
+    timelines_signed_off = (
+        tlc.all_teams_complete(tlc_state) if tlc_state else False
+    )
+
+    if tlc_state is None:
+        st.warning(
+            "⏳ TL timeline checks have not started for this week. "
+            "The Friday 09:00 bot will post the per-team threads in "
+            "#reward-time-questions-cs. The reward time post is gated until "
+            "all three teams sign off."
+        )
+    else:
+        progress = tlc.team_progress(tlc_state)
+        parts = []
+        for tl, p in progress.items():
+            if p["complete"]:
+                tag = f"✅ {tl}"
+            else:
+                tag = f"{tl} {p['done']}/{p['total']}"
+            if p["flag_count"]:
+                tag += f" ({p['flag_count']} flag{'s' if p['flag_count'] > 1 else ''})"
+            parts.append(tag)
+        summary = " · ".join(parts)
+        if timelines_signed_off:
+            st.success(f"✅ TL timeline checks complete — {summary}")
+        else:
+            pending_bits = [
+                f"{tl}: {', '.join(p['pending'])}"
+                for tl, p in progress.items()
+                if p["pending"]
+            ]
+            st.warning(
+                f"⏳ TL timeline checks in progress — {summary}.  \n"
+                f"Pending: {' · '.join(pending_bits) if pending_bits else 'none'}.  \n"
+                "Reward time post is gated until all three teams sign off."
+            )
+
     qualified_count = sum(1 for name in RT_AGENTS if week_data.get(name) and calculate_eligibility(week_data[name])[0])
     total_count = sum(1 for name in RT_AGENTS if week_data.get(name) and week_data[name].days_worked > 0)
     st.metric("Qualified", f"{qualified_count} / {total_count}")
@@ -2155,9 +2201,15 @@ elif page == "🏆 Reward Time":
                 st.error(f"Failed: {e}")
 
     with col_send_live:
+        send_help = (
+            "LIVE post — visible to everyone in the channel."
+            if timelines_signed_off
+            else "Blocked: TL timeline checks not yet complete (see banner above)."
+        )
         if st.button("📤 Send to #reward-time-questions-cs",
                       type='primary', use_container_width=True,
-                      help="LIVE post — visible to everyone in the channel."):
+                      disabled=not timelines_signed_off,
+                      help=send_help):
             try:
                 write_week_summary(reward_friday, week_data)
                 msg = build_reward_message_by_team(reward_friday, week_data)
