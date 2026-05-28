@@ -1069,31 +1069,108 @@ def _hhmm_to_float(s: str):
         return None
 
 
+WORKING_HOURS_SHEET_ID = "1MnzXWPOLHld8vliMVUDKfmTGOO9tZuwyQj4fM1IdyQY"
+
+
+def _parse_sheet_time(s):
+    """Parse a 'Usual Working Hours' cell into (start_h, end_h).
+
+    Returns None for entries we can't make sense of (split shifts,
+    hours-only, free text, blanks) — callers fall back to DEFAULT_SHIFTS.
+    """
+    if not s:
+        return None
+    import re as _re
+    raw = s.strip().lower()
+    if not raw:
+        return None
+    if "," in raw or " then " in raw:
+        return None
+    # First option for "9 - 5.30 or 8.30 - 5".
+    raw = raw.split(" or ")[0].strip()
+    # Strip parenthetical notes like "(off Mon)".
+    raw = _re.sub(r"\(.*?\)", "", raw).strip()
+    # UK dot-time → colon: '5.30' → '5:30'.
+    raw = _re.sub(r"(\d+)\.(\d{2})\b", r"\1:\2", raw)
+    # If non-time letters remain (e.g. 'mon-thurs'), bail.
+    stripped = _re.sub(r"\b(am|pm)\b", "", raw)
+    if _re.search(r"[a-z]", stripped):
+        return None
+    return _parse_time_range_start_end(raw)
+
+
+@st.cache_data(ttl=600)
+def load_working_hours_from_sheet() -> dict:
+    """Read the 'Usual Working Hours' sheet → {name: {day_idx: (start, end)}}.
+
+    Free-form rows (Tara's '4.5 Mon-Thurs', Sophie's split shift,
+    Becky's 'A or B') drop out — DEFAULT_SHIFTS handles those.
+    Cached for 10 minutes so we don't hit the sheet on every rerun.
+    """
+    import re as _re
+    try:
+        gc = _cached_gspread()
+        ss = gc.open_by_key(WORKING_HOURS_SHEET_ID)
+        ws = ss.worksheets()[0]
+        rows = ws.get_all_values()
+    except Exception:
+        return {}
+
+    out: dict[str, dict[int, tuple[float, float]]] = {}
+    for row in rows:
+        if not row or len(row) < 6:
+            continue
+        name = row[0].strip()
+        if not name:
+            continue
+        # Strip annotations like '(Left CS 27 Apr)'.
+        name = _re.sub(r"\s*\(.*?\)", "", name).strip()
+        if name in ("", "Mon", "Tue", "Wed", "Thu", "Fri"):
+            continue
+        per_day: dict[int, tuple[float, float]] = {}
+        for di, cell in enumerate(row[1:6]):
+            parsed = _parse_sheet_time(cell)
+            if parsed is not None:
+                per_day[di] = parsed
+        if per_day:
+            out[name] = per_day
+    return out
+
+
 def effective_shift_window(name, picked_day, moves):
     """Effective (start_h, end_h) shift window for a person on picked_day.
 
-    Defaults to DEFAULT_SHIFTS[name]. If the day has a single bounded move
-    for this person whose duration matches DEFAULT_HOURS[name][day_idx]
-    within ~30 min, treat that as a shift-defining move (covers the part-
-    timer case where the move 07:00-11:30 IS today's whole shift, not just
-    a mid-day swap).
+    Priority:
+      1. Bounded move whose duration matches DEFAULT_HOURS[name][day_idx]
+         within ~30 min (a shift-defining move, e.g. Tara 07:00-11:30).
+      2. Per-day entry in the Usual Working Hours sheet.
+      3. Static DEFAULT_SHIFTS[name].
     """
     default = DEFAULT_SHIFTS.get(name, (8.0, 17.0))
     day_idx = picked_day.weekday()
     if day_idx > 4:
         return default
+
+    # Sheet override takes precedence over the static default.
+    try:
+        sheet_shifts = load_working_hours_from_sheet()
+        if name in sheet_shifts and day_idx in sheet_shifts[name]:
+            default = sheet_shifts[name][day_idx]
+    except Exception:
+        pass
+
+    # Move override (only when the move IS the shift, not a mid-day swap).
     daily_hours = (DEFAULT_HOURS.get(name) or {}).get(day_idx)
-    if not daily_hours:
-        return default
-    for m in moves:
-        if m.get("name") != name or m.get("action") != "move":
-            continue
-        s = _hhmm_to_float(m.get("start_time"))
-        e = _hhmm_to_float(m.get("end_time"))
-        if s is None or e is None:
-            continue
-        if abs((e - s) - daily_hours) <= 0.5:
-            return (s, e)
+    if daily_hours:
+        for m in moves:
+            if m.get("name") != name or m.get("action") != "move":
+                continue
+            s = _hhmm_to_float(m.get("start_time"))
+            e = _hhmm_to_float(m.get("end_time"))
+            if s is None or e is None:
+                continue
+            if abs((e - s) - daily_hours) <= 0.5:
+                return (s, e)
     return default
 
 
