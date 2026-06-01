@@ -287,10 +287,26 @@ _PDT_TABLE_CACHE = {'name': None}
 def _find_pdt_table(cur):
     """Find the freshest pdt_things_done_by_person table in looker_scratch.
 
-    Cached for the lifetime of the Python process; restart the Streamlit
-    app if Looker rebuilds its scratch tables (uncommon)."""
-    if _PDT_TABLE_CACHE['name'] is not None:
-        return _PDT_TABLE_CACHE['name']
+    Cached for the lifetime of the Python process — but PDT tables rotate
+    (Looker drops the old one and rebuilds), so when we have a cached name
+    we probe it first with a no-op SELECT. If it's been dropped
+    (UndefinedTable) we roll back the failed transaction, invalidate the
+    cache, and re-resolve. Avoids needing a manual app restart every time
+    Looker rebuilds the scratch table.
+    """
+    import psycopg2
+    cached = _PDT_TABLE_CACHE.get('name')
+    if cached:
+        try:
+            cur.execute(f"SELECT 1 FROM {cached} LIMIT 0")
+            return cached
+        except psycopg2.errors.UndefinedTable:
+            cur.connection.rollback()
+            _PDT_TABLE_CACHE['name'] = None
+            logging.info(f"PDT cache {cached!r} stale (table dropped); re-resolving")
+        except Exception:
+            cur.connection.rollback()
+            _PDT_TABLE_CACHE['name'] = None
 
     cur.execute("""
         SELECT table_schema || '.' || table_name
