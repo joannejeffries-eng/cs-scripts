@@ -129,16 +129,17 @@ def _yes_no(flag: bool, target: int) -> str:
 # Map raw week_data absence labels to the canonical strings the TL View
 # formula recognises as "🌴 Off". Anything not in this map passes through.
 _ABSENCE_NORMALISATION = {
-    "Annual leave": "Annual leave",
-    "Holiday":      "Annual leave",
-    "AL":           "Annual leave",
-    "Sick":         "Unexpected absence",
-    "Sickness":     "Unexpected absence",
-    "Illness":      "Unexpected absence",
-    "Off":          "Off",
-    "NWD":          "Off",
-    "Non working day": "Off",
-    "Training":     "Training",
+    "Annual leave":      "Annual leave",
+    "Holiday":           "Annual leave",
+    "AL":                "Annual leave",
+    "Sick":              "Unplanned absence",
+    "Sickness":          "Unplanned absence",
+    "Illness":           "Unplanned absence",
+    "Unplanned absence": "Unplanned absence",
+    "Off":               "Off",
+    "NWD":               "Off",
+    "Non working day":   "Off",
+    "Training":          "Training",
 }
 
 
@@ -246,7 +247,7 @@ def _day_outcome(dr) -> str:
         return ""
     if not dr.is_working:
         role = _normalise_absence_label(dr.role or "Off")
-        if role in ("Annual leave", "Unexpected absence", "Off", "Training", ""):
+        if role in ("Annual leave", "Unplanned absence", "Off", "Training", ""):
             return "🌴 Off"
         return "🌴 Off"
     # Walk segments (or treat the whole day as one segment) and ask:
