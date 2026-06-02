@@ -53,6 +53,7 @@ TAB_DATA_START_ROW = {
     "Targets": 2,
     "Reward Day Schedule": 2,
     "Data": 3,
+    "Split Breakdown": 4,  # rows 1-3 are title + day headers + sub-headers
 }
 
 logger = logging.getLogger(__name__)
@@ -239,6 +240,83 @@ def build_reward_day_rows() -> list[list]:
     return rows
 
 
+def _day_outcome(dr) -> str:
+    """Day-level outcome label matching the TL View vocabulary."""
+    if dr is None:
+        return ""
+    if not dr.is_working:
+        role = _normalise_absence_label(dr.role or "Off")
+        if role in ("Annual leave", "Unexpected absence", "Off", "Training", ""):
+            return "🌴 Off"
+        return "🌴 Off"
+    # Walk segments (or treat the whole day as one segment) and ask:
+    # did every targeted segment hit base / stretch?
+    segs = dr.segments if dr.segments else [dr]
+    base_ok = True
+    stretch_ok = True
+    any_target = False
+    for s in segs:
+        if not s.target_base and not s.target_stretch:
+            continue  # split-role-only roles like Reward time / Training: no target
+        any_target = True
+        if not s.met_base:
+            base_ok = False
+        if not s.met_stretch:
+            stretch_ok = False
+    if not any_target:
+        return "🌴 Off"
+    if stretch_ok:
+        return "⭐ Stretch"
+    if base_ok:
+        return "✅ Base"
+    return "❌ Miss"
+
+
+def build_split_breakdown_rows(reward_friday: date) -> list[list]:
+    """Per-person row with per-day breakdown:
+       Role 1 / Target / Base? / Stretch? / Role 2 / Target / Base? / Stretch? / Day outcome.
+
+    For split days, role segments are sorted by hours descending so the
+    primary role appears first. Rare 3+ segment days are truncated to 2.
+    """
+    week_data = rt.load_week(reward_friday)
+    if not week_data:
+        return []
+    dates = rt.get_weekday_dates(reward_friday)
+    rows = []
+    for name in sorted(week_data):
+        pw = week_data[name]
+        weekly_hours = sum(
+            dr.shift_hours for dr in pw.days.values() if dr.is_working
+        )
+        row = [name, round(weekly_hours, 2)]
+        for d in dates:
+            dr = pw.days.get(d)
+            if dr is None:
+                row += ["", "", "", "", "", "", "", "", ""]
+                continue
+            if not dr.is_working:
+                label = _normalise_absence_label(dr.role or "Off")
+                row += [label, "", "", "", "", "", "", "", "🌴 Off"]
+                continue
+            # Pick segments, sorted by hours descending
+            segs = (sorted(dr.segments, key=lambda s: -s.minutes)
+                    if dr.segments else [dr])
+            # Build per-segment cell tuples
+            def cell_quad(s) -> list:
+                if not s.target_base and not s.target_stretch:
+                    return [s.role, "—", "—", "—"]  # no-target role (Reward time etc.)
+                target_str = f"{s.target_base}/{s.target_stretch}"
+                base = _yes_no(s.met_base, s.target_base)
+                stretch = _yes_no(s.met_stretch, s.target_stretch)
+                return [s.role, target_str, base, stretch]
+            quad1 = cell_quad(segs[0])
+            quad2 = cell_quad(segs[1]) if len(segs) > 1 else ["", "", "", ""]
+            row += quad1 + quad2 + [_day_outcome(dr)]
+        rows.append(row)
+    return rows
+
+
 def build_data_rows(reward_friday: date) -> list[list]:
     """Per-person row matching Sam's Data tab shape (minimum viable).
 
@@ -331,6 +409,8 @@ def run(reward_friday: date, dm: bool = False) -> str:
     clear_and_write(sheet_id, "Targets", build_targets_rows())
     clear_and_write(sheet_id, "Reward Day Schedule", build_reward_day_rows())
     clear_and_write(sheet_id, "Data", build_data_rows(reward_friday))
+    clear_and_write(sheet_id, "Split Breakdown",
+                     build_split_breakdown_rows(reward_friday))
 
     autoresize_all_columns(sheet_id)
 
