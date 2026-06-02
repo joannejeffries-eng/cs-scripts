@@ -275,6 +275,28 @@ def _slack_dm_jo(text: str) -> None:
 # ── Main ────────────────────────────────────────────────────────────────────
 
 
+def autoresize_all_columns(spreadsheet_id: str) -> None:
+    """Auto-resize every column on every tab so wide content is readable."""
+    sheets = _sheets()
+    ss = sheets.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    requests = []
+    for s in ss["sheets"]:
+        sid = s["properties"]["sheetId"]
+        col_count = s["properties"]["gridProperties"].get("columnCount", 26)
+        requests.append({
+            "autoResizeDimensions": {
+                "dimensions": {
+                    "sheetId": sid, "dimension": "COLUMNS",
+                    "startIndex": 0, "endIndex": col_count,
+                }
+            }
+        })
+    if requests:
+        sheets.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id, body={"requests": requests}
+        ).execute()
+
+
 def run(reward_friday: date, dm: bool = False) -> str:
     sheet_id = find_or_copy_sheet(reward_friday)
 
@@ -285,6 +307,8 @@ def run(reward_friday: date, dm: bool = False) -> str:
     clear_and_write(sheet_id, "Targets", build_targets_rows())
     clear_and_write(sheet_id, "Reward Day Schedule", build_reward_day_rows())
     clear_and_write(sheet_id, "Data", build_data_rows(reward_friday))
+
+    autoresize_all_columns(sheet_id)
 
     link = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
     logger.info(f"Sheet populated: {link}")
