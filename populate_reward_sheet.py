@@ -107,12 +107,16 @@ def find_or_copy_sheet(reward_friday: date) -> str:
 
 
 def clear_and_write(spreadsheet_id: str, tab_name: str, rows: list[list]) -> None:
-    """Clear data rows on a tab (keep header) and write fresh rows."""
+    """Clear data rows on a tab (keep header) and write fresh rows.
+
+    Clear range goes out to column BZ (78 cols) so Sam's reference-week
+    values in the Data tab summary columns (AH-AY) get wiped.
+    """
     sheets = _sheets()
     start_row = TAB_DATA_START_ROW.get(tab_name, 2)
     sheets.spreadsheets().values().clear(
         spreadsheetId=spreadsheet_id,
-        range=f"'{tab_name}'!A{start_row}:Z",
+        range=f"'{tab_name}'!A{start_row}:BZ",
     ).execute()
     if not rows:
         return
@@ -335,9 +339,31 @@ def _ordered_names(week_data: dict) -> list:
 
 
 def build_data_rows(reward_friday: date) -> list[list]:
-    """Per-person row matching Sam's Data tab shape (minimum viable).
+    """Per-person row matching Sam's Data tab shape.
 
-    Cols: Week, Name, [for each day: Role, Base, Stretch, Actual, BaseMet, StretchMet], Skips
+    Columns (matching the template):
+      A  Week starting
+      B  Name
+      C  Primary role
+      D-I  Friday    (Role / Base / Stretch / Actual / BaseMet / StretchMet)
+      J-O  Monday
+      P-U  Tuesday
+      V-AA Wednesday
+      AB-AG Thursday
+      AH  Days Worked
+      AI  Baselines Hit
+      AJ  All Baselines Met?
+      AK  Stretch Days Hit
+      AL  Full Week Stretch?
+      AM  Hours Worked This Week  ← key for TLs
+      AN  Weekly Skips
+      AO  Skips OK?
+      AP  Quality Check     (manual)
+      AQ  Team Queues OK?   (manual)
+      AR  Reward Eligible?  (manual)
+      AS  Stretch Bonus?
+      AT-AV  Reward Hours (leave blank — driven by TL Calculator)
+      AW  Reward Block
     """
     week_data = rt.load_week(reward_friday)
     if not week_data:
@@ -347,7 +373,10 @@ def build_data_rows(reward_friday: date) -> list[list]:
     rows = []
     for name in _ordered_names(week_data):
         pw = week_data[name]
-        row = [week_str, name, ""]  # Primary Role left blank — split-aware
+        row = [week_str, name, ""]  # A, B, C
+        # Per-day blocks D-AG
+        base_hits = stretch_hits = 0
+        days_worked = 0
         for d in dates:
             dr = pw.days.get(d)
             if dr is None:
@@ -357,18 +386,102 @@ def build_data_rows(reward_friday: date) -> list[list]:
                 role = _normalise_absence_label(dr.role or "Off")
                 row += [role, "", "", "", "", ""]
                 continue
+            days_worked += 1
             if dr.segments:
                 role = " / ".join(s.role for s in dr.segments)
             else:
                 role = dr.role
+            if dr.met_base and dr.target_base:
+                base_hits += 1
+            if dr.met_stretch and dr.target_stretch:
+                stretch_hits += 1
             row += [
                 role, dr.target_base, dr.target_stretch, dr.actual,
                 _yes_no(dr.met_base, dr.target_base),
                 _yes_no(dr.met_stretch, dr.target_stretch),
             ]
-        row.append(pw.skips)
+        # Summary AH..AW
+        hours_worked = sum(
+            dr.shift_hours for dr in pw.days.values() if dr.is_working
+        )
+        reward_block = rt.REWARD_DAYS.get(name)
+        _DAY_FULL = {"Mon": "Monday", "Tue": "Tuesday", "Wed": "Wednesday",
+                     "Thu": "Thursday", "Fri": "Friday"}
+        reward_block_str = (
+            f"{_DAY_FULL.get(reward_block[0], reward_block[0])} {reward_block[1]}"
+            if reward_block else ""
+        )
+        skips_ok = "Yes" if pw.skips <= 4 else "No"  # rough threshold; TL can override
+        row += [
+            days_worked,                                       # AH
+            base_hits,                                         # AI
+            "Yes" if days_worked and base_hits == days_worked else "No",   # AJ
+            stretch_hits,                                      # AK
+            "Yes" if days_worked and stretch_hits == days_worked else "No",  # AL
+            round(hours_worked, 2),                            # AM
+            pw.skips,                                          # AN
+            skips_ok,                                          # AO
+            "",                                                # AP Quality (manual)
+            "",                                                # AQ Team Queues (manual)
+            "",                                                # AR Reward Eligible (manual)
+            "",                                                # AS Stretch Bonus
+            "",                                                # AT Base Reward Hours
+            "",                                                # AU Stretch Hours
+            "",                                                # AV Total Reward Hours
+            reward_block_str,                                  # AW
+        ]
         rows.append(row)
     return rows
+
+
+# Full-name → first-name mapping for TL Calculator updates (Sam's tab uses
+# full names whereas week_data keys are first names). Mirrors rt.DB_NAMES.
+def _full_name_to_first(name_full: str) -> str | None:
+    """Reverse lookup full name → first name used in week_data."""
+    for first, full in rt.DB_NAMES.items():
+        if full == name_full:
+            return first
+    # Already a first name (e.g. 'Harry')
+    if name_full in rt.ALL_AGENTS:
+        return name_full
+    return None
+
+
+def update_tl_calculator_weekly_hours(spreadsheet_id: str, reward_friday: date) -> None:
+    """Walk the TL Calculator's per-person rows and refresh column C
+    (Weekly Hours) so the Base/Stretch reward formulas pro-rate against
+    this week's actual hours worked.
+    """
+    week_data = rt.load_week(reward_friday)
+    if not week_data:
+        return
+    sheets = _sheets()
+    res = sheets.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range="'TL Calculator'!A1:C60",
+    ).execute()
+    rows = res.get("values", [])
+    updates = []
+    for r_idx, row in enumerate(rows):
+        if len(row) < 2 or not row[0] or not row[1]:
+            continue
+        # Data rows have a Manager in col B (col A is the agent's full name).
+        # Section header rows have only col A populated.
+        name_full = row[0].strip()
+        first = _full_name_to_first(name_full)
+        if first is None or first not in week_data:
+            continue
+        pw = week_data[first]
+        hours_worked = sum(
+            dr.shift_hours for dr in pw.days.values() if dr.is_working
+        )
+        cell = f"'TL Calculator'!C{r_idx + 1}"
+        updates.append({"range": cell, "values": [[round(hours_worked, 2)]]})
+    if updates:
+        sheets.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"valueInputOption": "USER_ENTERED", "data": updates},
+        ).execute()
 
 
 # ── Slack ───────────────────────────────────────────────────────────────────
@@ -437,6 +550,7 @@ def run(reward_friday: date, dm: bool = False) -> str:
     sheet_id = find_or_copy_sheet(reward_friday)
 
     update_tl_view_week_label(sheet_id, reward_friday)
+    update_tl_calculator_weekly_hours(sheet_id, reward_friday)
 
     clear_and_write(sheet_id, "Moves & Splits",
                      build_moves_and_splits_rows(reward_friday))
