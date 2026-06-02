@@ -125,6 +125,30 @@ def _yes_no(flag: bool, target: int) -> str:
     return "Yes" if flag else "No"
 
 
+# Map raw week_data absence labels to the canonical strings the TL View
+# formula recognises as "🌴 Off". Anything not in this map passes through.
+_ABSENCE_NORMALISATION = {
+    "Annual leave": "Annual leave",
+    "Holiday":      "Annual leave",
+    "AL":           "Annual leave",
+    "Sick":         "Unexpected absence",
+    "Sickness":     "Unexpected absence",
+    "Illness":      "Unexpected absence",
+    "Off":          "Off",
+    "NWD":          "Off",
+    "Non working day": "Off",
+    "Training":     "Training",
+}
+
+
+def _normalise_absence_label(role: str) -> str:
+    """Pass-through unless `role` is a known absence label; then return the
+    canonical version the TL View formula can interpret as Off."""
+    if not role:
+        return ""
+    return _ABSENCE_NORMALISATION.get(role.strip(), role)
+
+
 def build_moves_and_splits_rows(reward_friday: date) -> list[list]:
     """One row per (person, day, role segment)."""
     week_data = rt.load_week(reward_friday)
@@ -235,7 +259,7 @@ def build_data_rows(reward_friday: date) -> list[list]:
                 row += ["", "", "", "", "", ""]
                 continue
             if not dr.is_working:
-                role = dr.role or "Off"
+                role = _normalise_absence_label(dr.role or "Off")
                 row += [role, "", "", "", "", ""]
                 continue
             if dr.segments:
