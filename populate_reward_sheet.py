@@ -42,6 +42,10 @@ FOLDER_ID = "1APzc9fEFz86Hc4oqeUYTHDRh-9LtzC4s"
 TEMPLATE_ID = "1BXYvxKcrG_jm3WaKBmqxYIb5p0SCWc6_AG4RvpTFEM0"
 JO_USER_ID = "U07KFSSCUNT"
 
+# Order Data + TL View rows so the 6 Core Phones land in the first 6
+# Core Phones section rows. Wider Team follows alphabetically.
+CORE_PHONES_ORDER = ["Jade", "Harry", "Kate", "Becky", "Elida", "Fionn"]
+
 LOG_DIR = Path.home() / ".juno/scheduled-tasks/reward-sheet"
 LOG_FILE = LOG_DIR / "populate.log"
 
@@ -52,7 +56,10 @@ TAB_DATA_START_ROW = {
     "Working Hours": 2,
     "Targets": 2,
     "Reward Day Schedule": 2,
-    "Data": 3,
+    # Data row 3 is a section header in Sam's template ("CORE PHONES"); the
+    # TL View formulas reference Data!{col}4 onwards, so we start writing at
+    # row 4 to keep the offsets aligned.
+    "Data": 4,
     "Split Breakdown": 4,  # rows 1-3 are title + day headers + sub-headers
 }
 
@@ -158,8 +165,9 @@ def build_moves_and_splits_rows(reward_friday: date) -> list[list]:
         return []
     rows = []
     dates = rt.get_weekday_dates(reward_friday)  # [Fri, Mon, Tue, Wed, Thu]
+    name_order = _ordered_names(week_data)
     for d in dates:
-        for name in sorted(week_data):
+        for name in name_order:
             pw = week_data[name]
             dr = pw.days.get(d)
             if not dr or not dr.is_working:
@@ -285,7 +293,7 @@ def build_split_breakdown_rows(reward_friday: date) -> list[list]:
         return []
     dates = rt.get_weekday_dates(reward_friday)
     rows = []
-    for name in sorted(week_data):
+    for name in _ordered_names(week_data):
         pw = week_data[name]
         weekly_hours = sum(
             dr.shift_hours for dr in pw.days.values() if dr.is_working
@@ -318,6 +326,14 @@ def build_split_breakdown_rows(reward_friday: date) -> list[list]:
     return rows
 
 
+def _ordered_names(week_data: dict) -> list:
+    """Core Phones first (in CORE_PHONES_ORDER), then everyone else
+    alphabetically. Skips names missing from this week's data."""
+    core = [n for n in CORE_PHONES_ORDER if n in week_data]
+    others = sorted(n for n in week_data if n not in CORE_PHONES_ORDER)
+    return core + others
+
+
 def build_data_rows(reward_friday: date) -> list[list]:
     """Per-person row matching Sam's Data tab shape (minimum viable).
 
@@ -329,7 +345,7 @@ def build_data_rows(reward_friday: date) -> list[list]:
     dates = rt.get_weekday_dates(reward_friday)
     week_str = reward_friday.strftime("%Y-%m-%d")
     rows = []
-    for name in sorted(week_data):
+    for name in _ordered_names(week_data):
         pw = week_data[name]
         row = [week_str, name, ""]  # Primary Role left blank — split-aware
         for d in dates:
@@ -400,8 +416,27 @@ def autoresize_all_columns(spreadsheet_id: str) -> None:
         ).execute()
 
 
+def update_tl_view_week_label(spreadsheet_id: str, reward_friday: date) -> None:
+    """Overwrite the TL View header so it always reads
+    'Week beginning: DD/MM/YYYY' for the populated reward Friday."""
+    sheets = _sheets()
+    sheets.spreadsheets().values().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "valueInputOption": "USER_ENTERED",
+            "data": [
+                {"range": "'TL View'!A2", "values": [["Week beginning:"]]},
+                {"range": "'TL View'!B2",
+                 "values": [[reward_friday.strftime("%d/%m/%Y")]]},
+            ],
+        },
+    ).execute()
+
+
 def run(reward_friday: date, dm: bool = False) -> str:
     sheet_id = find_or_copy_sheet(reward_friday)
+
+    update_tl_view_week_label(sheet_id, reward_friday)
 
     clear_and_write(sheet_id, "Moves & Splits",
                      build_moves_and_splits_rows(reward_friday))
