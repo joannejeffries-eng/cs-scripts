@@ -389,7 +389,8 @@ def update_daily_notes_roles(gc, monday, assignments):
             continue
 
         cover_yes = (actual_role.startswith('Inbound phones')
-                      or actual_role == 'Triage + lender chasing')
+                      or actual_role == 'Triage + lender chasing'
+                      or actual_role == 'Triage and Video Calls')
         cover_str = 'Yes' if cover_yes else 'No'
 
         cur_role = (row[3] or '').strip()
