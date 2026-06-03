@@ -155,7 +155,7 @@ def clear_and_write(spreadsheet_id: str, tab_name: str, rows: list[list]) -> Non
                                    "startRowIndex": 2, "endRowIndex": 40,
                                    "startColumnIndex": 53, "endColumnIndex": 58},
                         "cell": {"userEnteredFormat": {
-                            "numberFormat": {"type": "PERCENT", "pattern": "0.0%"},
+                            "numberFormat": {"type": "PERCENT", "pattern": "0%"},
                         }},
                         "fields": "userEnteredFormat.numberFormat",
                     }},
@@ -485,9 +485,12 @@ def build_data_rows(reward_friday: date) -> list[list]:
         for d in dates:                                        # BB..BF
             dr = pw.days.get(d)
             if dr and dr.is_working and dr.archive_ratio:
-                # Raw decimal — paired with a 0.0% column format below so
-                # 0.847 reads "84.7%" (clearly below the 85% triage
-                # threshold) rather than rounding to a misleading "85%".
+                # Raw decimal — paired with a 0% column format so the
+                # display rounds to whole percentages. Note: 0.847
+                # renders as 85% (standard rounding) but the threshold
+                # check uses the raw decimal, so it still misses the 85%
+                # base threshold. The Base Met? cell on the same row is
+                # the source of truth for pass/fail.
                 row.append(dr.archive_ratio)
             else:
                 row.append("")
