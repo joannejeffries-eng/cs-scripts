@@ -136,19 +136,30 @@ def clear_and_write(spreadsheet_id: str, tab_name: str, rows: list[list]) -> Non
     if tab_name == "Data":
         # Reset cell formatting on Data rows 3-30 so the section-header
         # backgrounds carried over from Sam's template don't bleed into
-        # our data rows.
+        # our data rows. After clearing, re-apply the 0.0% number format
+        # on the per-day archive cols (BB-BF) so raw decimals like 0.847
+        # render as "84.7%".
         sheet_id = _get_sheet_id(sheets, spreadsheet_id, tab_name)
         if sheet_id is not None:
             sheets.spreadsheets().batchUpdate(
                 spreadsheetId=spreadsheet_id,
-                body={"requests": [{
-                    "updateCells": {
+                body={"requests": [
+                    {"updateCells": {
                         "range": {"sheetId": sheet_id,
                                    "startRowIndex": 2, "endRowIndex": 30,
                                    "startColumnIndex": 0, "endColumnIndex": 78},
                         "fields": "userEnteredFormat",
-                    }
-                }]},
+                    }},
+                    {"repeatCell": {
+                        "range": {"sheetId": sheet_id,
+                                   "startRowIndex": 2, "endRowIndex": 40,
+                                   "startColumnIndex": 53, "endColumnIndex": 58},
+                        "cell": {"userEnteredFormat": {
+                            "numberFormat": {"type": "PERCENT", "pattern": "0.0%"},
+                        }},
+                        "fields": "userEnteredFormat.numberFormat",
+                    }},
+                ]},
             ).execute()
 
     if not rows:
@@ -466,6 +477,20 @@ def build_data_rows(reward_friday: date) -> list[list]:
             "",                                                # AV Total Reward Hours
             reward_block_str,                                  # AW
         ]
+        # Pad past template's TL Notes / ChatGPT / Archive count/total cells.
+        row += ["", "", "", ""]                                # AX, AY, AZ, BA
+        # Per-day archive % so a triage miss caused by archive ratio (e.g.
+        # Tara Mon 01 Jun: hit target with 155, but archive ratio 84.7% < 85%
+        # threshold) is visible without spelunking the raw data.
+        for d in dates:                                        # BB..BF
+            dr = pw.days.get(d)
+            if dr and dr.is_working and dr.archive_ratio:
+                # Raw decimal — paired with a 0.0% column format below so
+                # 0.847 reads "84.7%" (clearly below the 85% triage
+                # threshold) rather than rounding to a misleading "85%".
+                row.append(dr.archive_ratio)
+            else:
+                row.append("")
         rows.append(row)
     return rows
 
