@@ -33,6 +33,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 import generate_rota as gr
+import refresh_daemon as rd
 import reward_time as rt
 from compat import get_slack_token
 
@@ -547,6 +548,17 @@ def update_tl_view_week_label(spreadsheet_id: str, reward_friday: date) -> None:
 
 
 def run(reward_friday: date, dm: bool = False) -> str:
+    # Pull fresh actuals for the current reward week before reading saved
+    # state — keeps ad-hoc / mid-week runs in sync with whatever happened
+    # since the last 06/11/13:30/15:30 daily-actuals cron. refresh_now()
+    # only refreshes the live reward week; calls for historical weeks are
+    # no-ops on data freshness, so guard.
+    if reward_friday == rt.get_reward_friday():
+        try:
+            rd.refresh_now()
+        except Exception:
+            logger.exception("refresh_now failed; continuing with saved state")
+
     sheet_id = find_or_copy_sheet(reward_friday)
 
     update_tl_view_week_label(sheet_id, reward_friday)
