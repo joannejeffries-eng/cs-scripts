@@ -181,6 +181,27 @@ def _yes_no(flag: bool, target: int) -> str:
     return "Yes" if flag else "No"
 
 
+def _met_with_rounded_archive(dr) -> tuple[bool, bool]:
+    """Recompute met_base/met_stretch against the rounded-to-integer archive
+    % that's shown on the sheet — so '85% archive shown' doesn't sit next to
+    'Base Met? = No' for a triage day at 84.7% raw (which rounds to 85%).
+
+    Non-triage days fall back to the dr's existing flags.
+    """
+    import math as _math
+    role = (dr.role or "").lower()
+    is_triage = "triage" in role
+    if not is_triage:
+        return bool(dr.met_base), bool(dr.met_stretch)
+    base_hit = bool(dr.target_base) and dr.actual >= dr.target_base
+    stretch_hit = bool(dr.target_stretch) and dr.actual >= dr.target_stretch
+    if dr.archive_ratio:
+        rounded_pct = _math.floor(dr.archive_ratio * 100 + 0.5)
+        base_hit = base_hit and rounded_pct >= 85
+        stretch_hit = stretch_hit and rounded_pct >= 87
+    return bool(base_hit), bool(stretch_hit)
+
+
 # Map raw week_data absence labels to the canonical strings the TL View
 # formula recognises as "🌴 Off". Anything not in this map passes through.
 _ABSENCE_NORMALISATION = {
@@ -223,18 +244,20 @@ def build_moves_and_splits_rows(reward_friday: date) -> list[list]:
             day_label = d.strftime("%a %d %b")
             if dr.segments:
                 for s in dr.segments:
+                    mb, ms = _met_with_rounded_archive(s)
                     rows.append([
                         day_label, name, s.role, round(s.minutes / 60, 2),
                         s.actual, s.target_base, s.target_stretch,
-                        _yes_no(s.met_base, s.target_base),
-                        _yes_no(s.met_stretch, s.target_stretch),
+                        _yes_no(mb, s.target_base),
+                        _yes_no(ms, s.target_stretch),
                     ])
             else:
+                mb, ms = _met_with_rounded_archive(dr)
                 rows.append([
                     day_label, name, dr.role, round(dr.shift_hours, 2),
                     dr.actual, dr.target_base, dr.target_stretch,
-                    _yes_no(dr.met_base, dr.target_base),
-                    _yes_no(dr.met_stretch, dr.target_stretch),
+                    _yes_no(mb, dr.target_base),
+                    _yes_no(ms, dr.target_stretch),
                 ])
     return rows
 
@@ -316,9 +339,10 @@ def _day_outcome(dr) -> str:
         if not s.target_base and not s.target_stretch:
             continue  # split-role-only roles like Reward time / Training: no target
         any_target = True
-        if not s.met_base:
+        mb, ms = _met_with_rounded_archive(s)
+        if not mb:
             base_ok = False
-        if not s.met_stretch:
+        if not ms:
             stretch_ok = False
     if not any_target:
         return "🌴 Off"
@@ -364,8 +388,9 @@ def build_split_breakdown_rows(reward_friday: date) -> list[list]:
                 if not s.target_base and not s.target_stretch:
                     return [s.role, "—", "—", "—"]  # no-target role (Reward time etc.)
                 target_str = f"{s.target_base}/{s.target_stretch}"
-                base = _yes_no(s.met_base, s.target_base)
-                stretch = _yes_no(s.met_stretch, s.target_stretch)
+                mb, ms = _met_with_rounded_archive(s)
+                base = _yes_no(mb, s.target_base)
+                stretch = _yes_no(ms, s.target_stretch)
                 return [s.role, target_str, base, stretch]
             quad1 = cell_quad(segs[0])
             quad2 = cell_quad(segs[1]) if len(segs) > 1 else ["", "", "", ""]
@@ -438,14 +463,15 @@ def build_data_rows(reward_friday: date) -> list[list]:
                 role = " / ".join(s.role for s in dr.segments)
             else:
                 role = dr.role
-            if dr.met_base and dr.target_base:
+            met_base_eff, met_stretch_eff = _met_with_rounded_archive(dr)
+            if met_base_eff and dr.target_base:
                 base_hits += 1
-            if dr.met_stretch and dr.target_stretch:
+            if met_stretch_eff and dr.target_stretch:
                 stretch_hits += 1
             row += [
                 role, dr.target_base, dr.target_stretch, dr.actual,
-                _yes_no(dr.met_base, dr.target_base),
-                _yes_no(dr.met_stretch, dr.target_stretch),
+                _yes_no(met_base_eff, dr.target_base),
+                _yes_no(met_stretch_eff, dr.target_stretch),
             ]
         # Summary AH..AW
         hours_worked = sum(
