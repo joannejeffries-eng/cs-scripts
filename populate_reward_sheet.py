@@ -107,18 +107,50 @@ def find_or_copy_sheet(reward_friday: date) -> str:
     return copy["id"]
 
 
+def _get_sheet_id(sheets, spreadsheet_id: str, tab_name: str) -> int | None:
+    ss = sheets.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    for s in ss["sheets"]:
+        if s["properties"]["title"] == tab_name:
+            return s["properties"]["sheetId"]
+    return None
+
+
 def clear_and_write(spreadsheet_id: str, tab_name: str, rows: list[list]) -> None:
     """Clear data rows on a tab (keep header) and write fresh rows.
 
     Clear range goes out to column BZ (78 cols) so Sam's reference-week
-    values in the Data tab summary columns (AH-AY) get wiped.
+    values in the Data tab summary columns (AH-AY) get wiped. For the
+    Data tab we ALSO clear from row 3 (one above the data start) to wipe
+    any leftover values + the template's section-header backgrounds (pale
+    green on rows 3 / "CORE PHONES" + row 9 / "WIDER TEAM") so freshly
+    written rows don't inherit them.
     """
     sheets = _sheets()
     start_row = TAB_DATA_START_ROW.get(tab_name, 2)
+    clear_start_row = 3 if tab_name == "Data" else start_row
     sheets.spreadsheets().values().clear(
         spreadsheetId=spreadsheet_id,
-        range=f"'{tab_name}'!A{start_row}:BZ",
+        range=f"'{tab_name}'!A{clear_start_row}:BZ",
     ).execute()
+
+    if tab_name == "Data":
+        # Reset cell formatting on Data rows 3-30 so the section-header
+        # backgrounds carried over from Sam's template don't bleed into
+        # our data rows.
+        sheet_id = _get_sheet_id(sheets, spreadsheet_id, tab_name)
+        if sheet_id is not None:
+            sheets.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={"requests": [{
+                    "updateCells": {
+                        "range": {"sheetId": sheet_id,
+                                   "startRowIndex": 2, "endRowIndex": 30,
+                                   "startColumnIndex": 0, "endColumnIndex": 78},
+                        "fields": "userEnteredFormat",
+                    }
+                }]},
+            ).execute()
+
     if not rows:
         return
     sheets.spreadsheets().values().update(
@@ -370,7 +402,10 @@ def build_data_rows(reward_friday: date) -> list[list]:
     if not week_data:
         return []
     dates = rt.get_weekday_dates(reward_friday)
-    week_str = reward_friday.strftime("%Y-%m-%d")
+    # UK slash format matches Sam's template + avoids inconsistent
+    # auto-parsing where Sheets reads some cells as dates and others as
+    # raw strings (which was making Fionn's row look different).
+    week_str = reward_friday.strftime("%d/%m/%Y")
     rows = []
     for name in _ordered_names(week_data):
         pw = week_data[name]
