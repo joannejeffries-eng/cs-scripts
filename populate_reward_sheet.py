@@ -41,6 +41,7 @@ from compat import get_slack_token
 
 FOLDER_ID = "1APzc9fEFz86Hc4oqeUYTHDRh-9LtzC4s"
 TEMPLATE_ID = "1BXYvxKcrG_jm3WaKBmqxYIb5p0SCWc6_AG4RvpTFEM0"
+ROTA_SHEET_ID = "1CMSEZSb-4D4mO6iPb8tVSaAPsZT5KZst9VSXH4bpi0Y"
 JO_USER_ID = "U07KFSSCUNT"
 
 # Order Data + TL View rows so the 6 Core Phones land in the first 6
@@ -181,25 +182,125 @@ def _yes_no(flag: bool, target: int) -> str:
     return "Yes" if flag else "No"
 
 
-def _met_with_rounded_archive(dr) -> tuple[bool, bool]:
-    """Recompute met_base/met_stretch against the rounded-to-integer archive
-    % that's shown on the sheet — so '85% archive shown' doesn't sit next to
-    'Base Met? = No' for a triage day at 84.7% raw (which rounds to 85%).
+def read_individual_overrides() -> list[dict]:
+    """Read the rota's Overrides tab → list of {agent, role, baseline, stretch}.
 
-    Non-triage days fall back to the dr's existing flags.
+    Mirrors fill_tracker.read_overrides() but only pulls the individual
+    target overrides section (we don't need the standing rules or pro-rata
+    keywords here — those are applied by reward_time.py before save).
+    """
+    try:
+        gc = _gspread()
+        ss = gc.open_by_key(ROTA_SHEET_ID)
+        ws = ss.worksheet("Overrides")
+    except Exception:
+        logger.exception("Could not read Overrides tab; continuing with no overrides")
+        return []
+    out = []
+    section = None
+    for row in ws.get_all_values():
+        if not row or all(c.strip() == "" for c in row):
+            continue
+        first = row[0].strip()
+        if first == "INDIVIDUAL TARGET OVERRIDES":
+            section = "header"
+            continue
+        if first.startswith("STANDING RULES"):
+            break
+        if section == "header" and first == "Name":
+            section = "data"
+            continue
+        if section != "data":
+            continue
+        name = row[0].strip()
+        role = row[1].strip() if len(row) > 1 else ""
+        baseline_s = row[2].strip() if len(row) > 2 else ""
+        stretch_s = row[3].strip() if len(row) > 3 else ""
+        active = (row[5].strip().upper() if len(row) > 5 else "Y")
+        if not name or active != "Y":
+            continue
+        try:
+            baseline = int(baseline_s) if baseline_s else None
+            stretch = int(stretch_s) if stretch_s else None
+        except ValueError:
+            logger.warning(f"Bad override values for {name}: base={baseline_s!r} stretch={stretch_s!r}")
+            continue
+        out.append({"agent": name, "role": role,
+                     "baseline": baseline, "stretch": stretch})
+    return out
+
+
+def _gspread():
+    """Lazy gspread client (avoids loading streamlit imports at top of file)."""
+    from rota_app import _cached_gspread
+    return _cached_gspread()
+
+
+def _apply_override(name: str, role: str, shift_hours: float,
+                     target_base: int, target_stretch: int,
+                     overrides: list[dict]) -> tuple[int, int]:
+    """Apply individual target override if (name, role) matches one in the
+    Overrides tab. Override values are full-time numbers; we pro-rate them
+    against `shift_hours / 8` so a part-timer's override scales with their
+    contracted hours that day.
+    """
+    for ov in overrides:
+        if ov["agent"] != name:
+            continue
+        ov_role = ov["role"]
+        if not (role == ov_role or role.startswith(ov_role)):
+            continue
+        ratio = (shift_hours / 8.0) if shift_hours else 1.0
+        if ov["baseline"] is not None:
+            target_base = round(ov["baseline"] * ratio)
+        if ov["stretch"] is not None:
+            target_stretch = round(ov["stretch"] * ratio)
+        return target_base, target_stretch
+    return target_base, target_stretch
+
+
+# Loaded once per populator run from read_individual_overrides().
+_OVERRIDES: list[dict] = []
+
+
+def _effective_targets_and_met(dr_or_seg, name: str) -> tuple[int, int, bool, bool]:
+    """For a DayResult OR RoleSegment, return:
+        (effective_base, effective_stretch, met_base, met_stretch)
+
+    - Individual target override applied (pro-rated by shift hours) from
+      the rota's Overrides tab — e.g. Kate's Phones target is 61/70 vs
+      the team default 72/82.
+    - Met flags use rounded archive % for triage roles so '85% archive'
+      doesn't sit next to 'Base Met? = No' for a 0.847-raw day.
     """
     import math as _math
-    role = (dr.role or "").lower()
-    is_triage = "triage" in role
-    if not is_triage:
-        return bool(dr.met_base), bool(dr.met_stretch)
-    base_hit = bool(dr.target_base) and dr.actual >= dr.target_base
-    stretch_hit = bool(dr.target_stretch) and dr.actual >= dr.target_stretch
-    if dr.archive_ratio:
-        rounded_pct = _math.floor(dr.archive_ratio * 100 + 0.5)
+    role = (dr_or_seg.role or "")
+    base = dr_or_seg.target_base
+    stretch = dr_or_seg.target_stretch
+    # Shift hours: DayResult has .shift_hours; RoleSegment has .minutes.
+    if hasattr(dr_or_seg, "minutes") and not hasattr(dr_or_seg, "shift_hours"):
+        shift_h = dr_or_seg.minutes / 60.0
+    elif hasattr(dr_or_seg, "shift_hours"):
+        shift_h = dr_or_seg.shift_hours
+    else:
+        shift_h = 8.0
+
+    base, stretch = _apply_override(name, role, shift_h, base, stretch, _OVERRIDES)
+
+    is_triage = "triage" in role.lower()
+    base_hit = bool(base) and dr_or_seg.actual >= base
+    stretch_hit = bool(stretch) and dr_or_seg.actual >= stretch
+    if is_triage and dr_or_seg.archive_ratio:
+        rounded_pct = _math.floor(dr_or_seg.archive_ratio * 100 + 0.5)
         base_hit = base_hit and rounded_pct >= 85
         stretch_hit = stretch_hit and rounded_pct >= 87
-    return bool(base_hit), bool(stretch_hit)
+    return int(base or 0), int(stretch or 0), bool(base_hit), bool(stretch_hit)
+
+
+def _met_with_rounded_archive(dr_or_seg, name: str = "") -> tuple[bool, bool]:
+    """Backwards-compat wrapper — drops the targets, returns only met flags."""
+    _b, _s, mb, ms = _effective_targets_and_met(dr_or_seg, name)
+    return mb, ms
 
 
 # Map raw week_data absence labels to the canonical strings the TL View
@@ -244,20 +345,20 @@ def build_moves_and_splits_rows(reward_friday: date) -> list[list]:
             day_label = d.strftime("%a %d %b")
             if dr.segments:
                 for s in dr.segments:
-                    mb, ms = _met_with_rounded_archive(s)
+                    eb, es, mb, ms = _effective_targets_and_met(s, name)
                     rows.append([
                         day_label, name, s.role, round(s.minutes / 60, 2),
-                        s.actual, s.target_base, s.target_stretch,
-                        _yes_no(mb, s.target_base),
-                        _yes_no(ms, s.target_stretch),
+                        s.actual, eb, es,
+                        _yes_no(mb, eb),
+                        _yes_no(ms, es),
                     ])
             else:
-                mb, ms = _met_with_rounded_archive(dr)
+                eb, es, mb, ms = _effective_targets_and_met(dr, name)
                 rows.append([
                     day_label, name, dr.role, round(dr.shift_hours, 2),
-                    dr.actual, dr.target_base, dr.target_stretch,
-                    _yes_no(mb, dr.target_base),
-                    _yes_no(ms, dr.target_stretch),
+                    dr.actual, eb, es,
+                    _yes_no(mb, eb),
+                    _yes_no(ms, es),
                 ])
     return rows
 
@@ -320,7 +421,7 @@ def build_reward_day_rows() -> list[list]:
     return rows
 
 
-def _day_outcome(dr) -> str:
+def _day_outcome(dr, name: str = "") -> str:
     """Day-level outcome label matching the TL View vocabulary."""
     if dr is None:
         return ""
@@ -339,7 +440,7 @@ def _day_outcome(dr) -> str:
         if not s.target_base and not s.target_stretch:
             continue  # split-role-only roles like Reward time / Training: no target
         any_target = True
-        mb, ms = _met_with_rounded_archive(s)
+        mb, ms = _met_with_rounded_archive(s, name)
         if not mb:
             base_ok = False
         if not ms:
@@ -387,14 +488,14 @@ def build_split_breakdown_rows(reward_friday: date) -> list[list]:
             def cell_quad(s) -> list:
                 if not s.target_base and not s.target_stretch:
                     return [s.role, "—", "—", "—"]  # no-target role (Reward time etc.)
-                target_str = f"{s.target_base}/{s.target_stretch}"
-                mb, ms = _met_with_rounded_archive(s)
-                base = _yes_no(mb, s.target_base)
-                stretch = _yes_no(ms, s.target_stretch)
+                eb, es, mb, ms = _effective_targets_and_met(s, name)
+                target_str = f"{eb}/{es}"
+                base = _yes_no(mb, eb)
+                stretch = _yes_no(ms, es)
                 return [s.role, target_str, base, stretch]
             quad1 = cell_quad(segs[0])
             quad2 = cell_quad(segs[1]) if len(segs) > 1 else ["", "", "", ""]
-            row += quad1 + quad2 + [_day_outcome(dr)]
+            row += quad1 + quad2 + [_day_outcome(dr, name)]
         rows.append(row)
     return rows
 
@@ -463,15 +564,17 @@ def build_data_rows(reward_friday: date) -> list[list]:
                 role = " / ".join(s.role for s in dr.segments)
             else:
                 role = dr.role
-            met_base_eff, met_stretch_eff = _met_with_rounded_archive(dr)
-            if met_base_eff and dr.target_base:
+            eff_base, eff_stretch, met_base_eff, met_stretch_eff = (
+                _effective_targets_and_met(dr, name)
+            )
+            if met_base_eff and eff_base:
                 base_hits += 1
-            if met_stretch_eff and dr.target_stretch:
+            if met_stretch_eff and eff_stretch:
                 stretch_hits += 1
             row += [
-                role, dr.target_base, dr.target_stretch, dr.actual,
-                _yes_no(met_base_eff, dr.target_base),
-                _yes_no(met_stretch_eff, dr.target_stretch),
+                role, eff_base, eff_stretch, dr.actual,
+                _yes_no(met_base_eff, eff_base),
+                _yes_no(met_stretch_eff, eff_stretch),
             ]
         # Summary AH..AW
         hours_worked = sum(
@@ -647,6 +750,16 @@ def run(reward_friday: date, dm: bool = False) -> str:
             rd.refresh_now()
         except Exception:
             logger.exception("refresh_now failed; continuing with saved state")
+
+    # Load individual target overrides from the rota's Overrides tab.
+    # Cached for this run; row builders read via the _OVERRIDES module var.
+    global _OVERRIDES
+    _OVERRIDES = read_individual_overrides()
+    if _OVERRIDES:
+        label = ", ".join(f"{o['agent']}/{o['role']}" for o in _OVERRIDES)
+        logger.info(
+            f"Loaded {len(_OVERRIDES)} individual target override(s): {label}"
+        )
 
     sheet_id = find_or_copy_sheet(reward_friday)
 
