@@ -1873,6 +1873,10 @@ def _update_segments_actuals(dr, person_actuals):
             all_stretch = False
         elif not seg.met_stretch:
             all_stretch = False
+    # Aggregate productive throughput across segments. Reward time / Appointment /
+    # Training segments have target_base=0 and their seg.actual is in different
+    # units (minutes), so exclude them — otherwise dr.actual would mix calls + minutes.
+    dr.actual = sum(s.actual for s in dr.segments if s.target_base > 0)
     dr.met_base = all_base
     dr.met_stretch = all_stretch
 
@@ -1994,6 +1998,7 @@ def _refresh_met_from_segments(dr):
             all_stretch = False
         elif not seg.met_stretch:
             all_stretch = False
+    dr.actual = sum(s.actual for s in dr.segments if s.target_base > 0)
     dr.met_base = all_base
     dr.met_stretch = all_stretch
 
