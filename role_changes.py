@@ -174,7 +174,13 @@ _MOVE_RE = re.compile(
     r'^\s*(?P<name>\w+)\s*'
     r'(?:→|⟶|➡️|->|=>|to|moved\s+to|on)\s+'
     r'(?P<role>[\w+ ]+?)'
-    r'(?:\s+(?P<start>\d{1,2}(?::\d{2})?)\s*-\s*(?P<end>\d{1,2}(?::\d{2})?))?'
+    # Time spec — fully optional, all four shapes accepted:
+    #   (none)              · "Clare to chasing"
+    #   start only          · "Clare to chasing 09:20"            (open-ended; closed by "Clare back")
+    #   "at" + start        · "Clare to chasing at 09:20"
+    #   start-end range     · "Clare to chasing 09:20-12:00"
+    r'(?:\s+(?:at\s+)?(?P<start>\d{1,2}(?::\d{2})?)'
+    r'(?:\s*-\s*(?P<end>\d{1,2}(?::\d{2})?))?)?'
     r'\s*$',
     re.IGNORECASE,
 )
@@ -200,6 +206,9 @@ def parse_role_change_message(text: str, message_ts: str,
     clean = re.sub(r'\s+', ' ', clean)
     clean = _ARROW_RE.sub(' → ', clean)
     clean = re.sub(r'\s+→\s+', ' → ', clean)
+    # Normalise en-dash / em-dash / minus / non-breaking hyphen → ASCII '-'
+    # (Mac autocorrect and Slack often turn "10-12" into "10–12".)
+    clean = re.sub(r'[‐‑‒–—―−]', '-', clean)
 
     noted_at = ''
     try:
