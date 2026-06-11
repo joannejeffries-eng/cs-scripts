@@ -25,10 +25,12 @@ DB_URL = os.environ['STAFF_APP_LOOKER_POSTGRES_URL']
 
 # Tracker agents (in order they appear in the spreadsheet)
 CORE_PHONES = ['Becky', 'Elida', 'Fionn', 'Jade', 'Kate']
-# Harry (Courtney) & Roseanne (Yasmin) join the reward tracker once they finish
-# training and enter the reward scheme — they're in the rota now but not assessed yet.
-WIDER_TEAM = ['Charne', 'Clare', 'Cris', 'Erika', 'Harriet',
-              'Kirsty', 'Lizzie', 'Lucy', 'Maisha', 'Noemi', 'Sophie', 'Tara']
+# Harry (Courtney) joined the reward tracker 2026-06-11; Roseanne (Yasmin)
+# from 2026-06-11. Charne kept in the list — her column is hidden on the
+# live tracker.
+WIDER_TEAM = ['Charne', 'Clare', 'Cris', 'Erika', 'Harriet', 'Harry',
+              'Kirsty', 'Lizzie', 'Lucy', 'Maisha', 'Noemi', 'Roseanne',
+              'Sophie', 'Tara']
 ALL_AGENTS = CORE_PHONES + WIDER_TEAM
 
 # DB full name mapping (first name -> full name in database)
@@ -48,6 +50,8 @@ DB_NAMES = {
     'Lucy': 'Lucy Riordan',
     'Maisha': 'Maisha Begum',
     'Noemi': 'Noemi Sip',
+    'Harry': 'Harry McNicholas',
+    'Roseanne': 'Roseanne Brooks-Brown',
     'Sophie': 'Sophie Maloney',
     'Tara': 'Tara Dunkley',
 }
