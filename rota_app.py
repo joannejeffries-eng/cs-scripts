@@ -167,7 +167,7 @@ def _cached_working_hours():
 CORE_PHONES = ['Becky', 'Elida', 'Fionn', 'Jade', 'Kate']
 WIDER_TEAM = ['Clare', 'Cris', 'Erika', 'Harriet', 'Harry',
               'Kirsty', 'Lizzie', 'Lucy', 'Maisha', 'Noemi', 'Roseanne',
-              'Sophie', 'Tara', 'Thea']
+              'Sophie', 'Tara']
 
 
 # ── Slack ──────────────────────────────────────────────────────────────────
@@ -340,7 +340,7 @@ FULL_NAMES = {
     'Jade': 'Jade Regent', 'Kate': "Kate O'Neill", 'Kirsty': 'Kirsty Rowley',
     'Lizzie': 'Lizzie Williamson', 'Lucy': 'Lucy Riordan',
     'Maisha': 'Maisha Begum', 'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
-    'Tara': 'Tara Dunkley', 'Thea': 'Thea Willsmore',
+    'Tara': 'Tara Dunkley',
     'Jess': 'Jess Jackson', 'Yasmin': 'Yasmin Aly', 'Courtney': 'Courtney Elijah',
     'Jo': 'Joanne Jeffries',
 }
@@ -460,7 +460,6 @@ PEGASUS_CHANNELS = {
     'Roseanne': 'C0B6G6NJ6DP',   # #pegasus-roseanne-y
     'Sophie':   'C095Y5UAFV4',   # #pegasus-sophie-y
     'Tara':     'C07TH1E24EP',   # #pegasus-tara-y
-    'Thea':     'C09TASX0FLY',   # #pegasus-thea-l
     # TLs use their own channel
     'Courtney': 'C070TN8CEQK',
     'Jess':     'C07R3B17M0F',
@@ -479,7 +478,7 @@ PEGASUS_LABELS = {
     'Lucy': '#pegasus-lucy-j',    'Maisha': '#pegasus-maisha-j',
     'Noemi': '#pegasus-noemi-y',  'Roseanne': '#pegasus-roseanne-y',
     'Sophie': '#pegasus-sophie-y',
-    'Tara': '#pegasus-tara-y',    'Thea': '#pegasus-thea-l',
+    'Tara': '#pegasus-tara-y',
     'Courtney': '#pegasus-courtney',
     'Jess': '#pegasus-jess',
     'Yasmin': '#pegasus-yasmin',
@@ -1840,7 +1839,7 @@ elif page == "🏆 Reward Time":
     st.caption(f"Reward week: **{reward_friday.strftime('%d %b')} (Fri)** → **{reward_end.strftime('%d %b')} (Thu)**")
 
     # Week picker
-    col_pick1, col_pick2, col_pick3, col_pick4, col_pick5, col_pick6 = st.columns([2, 1, 1, 1, 1, 1])
+    col_pick1, col_pick2, col_pick3, col_pick4, col_pick5 = st.columns([2, 1, 1, 1, 1])
     with col_pick1:
         pick_date = st.date_input(
             "View reward week containing",
@@ -1876,15 +1875,6 @@ elif page == "🏆 Reward Time":
         )
     with col_pick5:
         st.write("")
-        apply_moves_clicked = st.button(
-            "🧩 Apply moves",
-            use_container_width=True,
-            help="Apply captured mid-day role moves from #dry-run-testing-jo "
-                 "(temporarily — was #client-support-leads). Splits each day "
-                 "using moves ≥ 30 min.",
-        )
-    with col_pick6:
-        st.write("")
         checks_clicked = st.button(
             "🔍 Run checks",
             use_container_width=True,
@@ -1895,6 +1885,9 @@ elif page == "🏆 Reward Time":
                  "flags for review. Pre-fills the tick boxes — you can still "
                  "override any. Takes ~30s (pulls activity + Cody).",
         )
+    # Apply moves used to be a manual button — Slack role-moves now fold into
+    # the week state automatically: the role-change daemon applies on capture
+    # (within seconds), and the daily-actuals cron re-syncs every refresh.
 
     # Load or initialise week data
     # Reward week Fri-Thu spans two rota weeks:
@@ -2048,87 +2041,6 @@ elif page == "🏆 Reward Time":
                     st.rerun()
             except Exception as e:
                 st.error(f"Resync failed: {e}")
-
-    if apply_moves_clicked:
-        import role_changes as _rc
-        with st.spinner("Reading captured moves and applying splits…"):
-            try:
-                applied_summary = []
-                reset_summary = []
-                skipped_summary = []
-                noise_skipped = 0
-                for d in reward_dates:
-                    moves = _rc.load_moves(d)
-                    # Pre-count moves below noise floor for summary
-                    for m in (moves or []):
-                        if m.get('action') in (None, 'move'):
-                            try:
-                                sh, sm = (int(p) for p in m.get('start_time', '0:0').split(':'))
-                                eh, em = (int(p) for p in m.get('end_time', '0:0').split(':'))
-                                dur = (eh * 60 + em) - (sh * 60 + sm)
-                                if 0 < dur < 30:
-                                    noise_skipped += 1
-                            except Exception:
-                                pass
-                    # Process everyone who has a move on this day OR was
-                    # previously split by Apply moves (so clearing the moves
-                    # collapses those days back to the planned rota).
-                    day_tag = d.strftime('%a %d/%m')
-                    names_with_moves = {m.get('name') for m in (moves or []) if m.get('name')}
-                    names_prev_applied = {
-                        name for name, pw in week_data.items()
-                        if any((o.get('field') or '').startswith(f'apply_moves ({day_tag})')
-                               for o in pw.overrides)
-                    }
-                    for name in sorted(names_with_moves | names_prev_applied):
-                        pw = week_data.get(name)
-                        if not pw:
-                            continue
-                        result = rt.apply_moves_to_day(pw, d, moves or [])
-                        label = f"{name} {day_tag}"
-                        if result['applied']:
-                            if result['segments']:
-                                segs = ', '.join(f"{r} {h:.1f}h" for r, h in result['segments'])
-                                applied_summary.append((label, segs))
-                            else:
-                                reset_summary.append((label, result['reason']))
-                        elif result['reason'] not in ('no qualifying moves',):
-                            skipped_summary.append((label, result['reason']))
-                changed = bool(applied_summary or reset_summary)
-                if changed:
-                    save_week(reward_friday, week_data)
-                    st.session_state[rw_key] = week_data
-
-                if applied_summary:
-                    st.success(f"Applied {len(applied_summary)} split(s) from captured moves.")
-                    with st.expander(f"✏️ {len(applied_summary)} day(s) split"):
-                        for lbl, segs in applied_summary:
-                            st.caption(f"  • {lbl}: {segs}")
-
-                if reset_summary:
-                    st.warning(f"↩️ Reset {len(reset_summary)} day(s) back to the planned "
-                               f"rota (moves cleared):")
-                    for lbl, reason in reset_summary:
-                        st.caption(f"  • {lbl}")
-
-                if not changed:
-                    st.info("No changes — captured moves already match the state "
-                            "(or none to apply).")
-
-                if skipped_summary or noise_skipped:
-                    parts = []
-                    if skipped_summary:
-                        parts.append(f"{len(skipped_summary)} day-person(s) skipped")
-                    if noise_skipped:
-                        parts.append(f"{noise_skipped} move(s) below 30-min noise floor")
-                    with st.expander("⏭️ " + ' · '.join(parts)):
-                        for lbl, reason in skipped_summary:
-                            st.caption(f"  • {lbl}: {reason}")
-
-                if changed:
-                    st.rerun()
-            except Exception as e:
-                st.error(f"Apply moves failed: {e}")
 
     if checks_clicked:
         with st.spinner("Pulling activity timelines + computing quality/timeline suggestions…"):
@@ -2361,9 +2273,10 @@ elif page == "🏆 Reward Time":
 
             # ── Day shape (read-only) ──
             # Splits, training and part-day leave are all driven from the Slack
-            # role-change message + 🧩 Apply moves; reward-time splits come from
-            # Daily Notes + 🔃 Resync. This is a read-only view of the result —
-            # no manual Split/Unsplit/hours editing here any more.
+            # role-change message — the daemon auto-folds each move into the
+            # week state within seconds, and the daily-actuals cron resyncs.
+            # Reward-time splits come from Daily Notes + 🔃 Resync. This is a
+            # read-only view of the result — no manual editing here.
             st.caption("**Day shape** (set via Slack moves + Daily Notes):")
             for d in reward_dates:
                 dr = pw.days.get(d)

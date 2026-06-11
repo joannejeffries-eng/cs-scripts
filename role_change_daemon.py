@@ -210,6 +210,29 @@ def _todays_rota_assignments(today: date) -> dict:
 
 # ── Main loop ──────────────────────────────────────────────────────────────
 
+def _auto_apply_for(d):
+    """Fold every captured move for the reward week containing `d` into the
+    saved reward-week state, so the app + audit snapshot reflect Slack moves
+    within seconds — no manual 'Apply moves' click needed.
+
+    Best-effort: a reward_time error here mustn't break the move-capture
+    flow, so we log + carry on. The daily-actuals cron also runs apply_all_moves
+    as a safety net.
+    """
+    try:
+        import reward_time as rt
+        friday = rt.get_reward_friday(d)
+        wk = rt.load_week(friday)
+        if not wk:
+            return
+        changes = rt.apply_all_moves(wk, friday)
+        if changes:
+            rt.save_week(friday, wk)
+            logging.info(f"auto-applied moves: {len(changes)} day-shape change(s)")
+    except Exception as e:
+        logging.warning(f"auto_apply_for {d} failed: {e}")
+
+
 def _format_confirmation(applied: dict) -> str:
     """Friendly reply text for a captured move."""
     if applied.get('action') == 'back-noop':
@@ -299,6 +322,7 @@ def poll_once(today: date, last_seen: str, anchor_ts: str) -> str:
                     f"Starting fresh — post new moves as `Name to role`."
                 )
                 logging.info(f"reset: cleared {len(existing)} moves for {today}")
+                _auto_apply_for(today)
             except Exception as e:
                 logging.exception("reset failed")
                 _react(channel, ts, 'x')
@@ -315,6 +339,7 @@ def poll_once(today: date, last_seen: str, anchor_ts: str) -> str:
             _react(channel, ts, 'white_check_mark')
             _thread_reply(channel, anchor_ts,
                            _format_confirmation(applied))
+            _auto_apply_for(today)
         except Exception as e:
             logging.exception("apply_move failed")
             _react(channel, ts, 'x')
