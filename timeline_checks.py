@@ -49,7 +49,6 @@ TEAMS: dict[str, dict] = {
             "Cris J",
             "Maisha J",
             "Erika",
-            "Thea",
             "Clare Brown",
             "Lucy Riordan",
         ],

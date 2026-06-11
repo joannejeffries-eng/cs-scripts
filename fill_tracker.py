@@ -28,7 +28,7 @@ CORE_PHONES = ['Becky', 'Elida', 'Fionn', 'Jade', 'Kate']
 # Harry (Courtney) & Roseanne (Yasmin) join the reward tracker once they finish
 # training and enter the reward scheme — they're in the rota now but not assessed yet.
 WIDER_TEAM = ['Charne', 'Clare', 'Cris', 'Erika', 'Harriet',
-              'Kirsty', 'Lizzie', 'Lucy', 'Maisha', 'Noemi', 'Sophie', 'Tara', 'Thea']
+              'Kirsty', 'Lizzie', 'Lucy', 'Maisha', 'Noemi', 'Sophie', 'Tara']
 ALL_AGENTS = CORE_PHONES + WIDER_TEAM
 
 # DB full name mapping (first name -> full name in database)
@@ -50,7 +50,6 @@ DB_NAMES = {
     'Noemi': 'Noemi Sip',
     'Sophie': 'Sophie Maloney',
     'Tara': 'Tara Dunkley',
-    'Thea': 'Thea Willsmore',
 }
 # Reverse: full name -> first name
 FIRST_NAMES = {v: k for k, v in DB_NAMES.items()}

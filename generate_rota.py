@@ -63,14 +63,14 @@ DB_NAMES = {
     'Erika': 'Erika Frolova', 'Harriet': 'Harriet Clifton-Sprigg',
     'Lizzie': 'Lizzie Williamson', 'Lucy': 'Lucy Riordan',
     'Maisha': 'Maisha Begum', 'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
-    'Tara': 'Tara Dunkley', 'Thea': 'Thea Willsmore',
+    'Tara': 'Tara Dunkley',
     'Harry': 'Harry McNicholas', 'Roseanne': 'Roseanne Brooks-Brown',
 }
 
 TL_TEAMS = {
     'Courtney': ['Fionn', 'Kate', 'Becky', 'Jade', 'Elida', 'Harriet', 'Harry'],
     'Yasmin': ['Tara', 'Sophie', 'Noemi', 'Lizzie', 'Kirsty', 'Roseanne'],
-    'Jess': ['Cris', 'Clare', 'Erika', 'Lucy', 'Maisha', 'Thea'],
+    'Jess': ['Cris', 'Clare', 'Erika', 'Lucy', 'Maisha'],
 }
 
 ALL_TLS = ['Yasmin', 'Courtney', 'Jess']
@@ -159,8 +159,6 @@ DEFAULT_SKILLS = {
                 'E-sign', 'ID Checks', 'ICS'},
     'Erika':   {'Triage', 'Inbound', 'Uncat', 'Webchat', 'Verify Addr', 'Call&Chase',
                 'E-sign', 'LMS/LE', 'ID Checks'},
-    'Thea':    {'Triage', 'Inbound', 'Uncat', 'Webchat', 'Lender Chase', 'Verify Addr',
-                'Call&Chase', 'E-sign', 'LMS/LE', 'ID Checks', 'ICS'},
     'Clare':   {'Triage', 'Webchat', 'Lender Chase', 'Verify Addr',
                 'Call&Chase', 'E-sign', 'LMS/LE', 'Video', 'ID Checks'},
     'Lucy':    set(),  # New starter — update as training completes
@@ -189,7 +187,6 @@ DEFAULT_HOURS = {
     'Erika':   {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Lucy':    {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Maisha':  {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
-    'Thea':    {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Noemi':   {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Tara':    {0: 4.5, 1: 4.5, 2: 4.5, 3: 4.5, 4: 4},
     'Sophie':  {0: 6, 1: 6, 2: 6, 3: 6, 4: 6},
@@ -215,7 +212,6 @@ DEFAULT_SHIFTS = {
     'Erika':   (8, 17),      # 8-5
     'Lucy':    (9, 18),      # 9-6 (assumed standard new starter)
     'Maisha':  (9, 18),      # 9-6
-    'Thea':    (9, 18),      # 9-6
     'Noemi':   (9, 18),      # 9-6
     'Tara':    (9, 13.5),    # ~4.5h (approx 9-1:30)
     'Sophie':  (7, 15),      # 7-8 + 9:30-3 (split — gap 8-9:30)
