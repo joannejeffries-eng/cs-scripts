@@ -94,10 +94,23 @@ def main():
         )
         return
 
-    # ── 2. Write the human-readable sheet snapshot ────────────────────
-    snapshot_ok = False
+    # ── 2. Fold Slack moves into the week before snapshotting ─────────
+    # Apply moves used to be a manual button — now it runs on every refresh
+    # so role switches (Clare to chasing, Maisha to phones, …) show on the
+    # spreadsheet + app without needing a click.
     try:
         friday = result['friday']
+        week_data = rt.load_week(friday)
+        move_changes = rt.apply_all_moves(week_data, friday)
+        if move_changes:
+            rt.save_week(friday, week_data)
+            logging.info(f"applied {len(move_changes)} move-derived day shape(s)")
+    except Exception as e:
+        logging.exception("apply_all_moves failed (continuing)")
+
+    # ── 3. Write the human-readable sheet snapshot ────────────────────
+    snapshot_ok = False
+    try:
         week_data = rt.load_week(friday)
         rt.write_daily_actuals_snapshot(friday, week_data)
         snapshot_ok = True

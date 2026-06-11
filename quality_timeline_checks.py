@@ -109,6 +109,12 @@ def main():
     if not week_data:
         _dm_jo("ℹ️ Thursday reward checks — no saved reward week to check yet.")
         return
+    # Fold the week's Slack moves in first so the checks see the actual day
+    # shapes (not stale planned-rota single roles).
+    try:
+        rt.apply_all_moves(week_data, friday)
+    except Exception:
+        logging.exception("apply_all_moves failed (continuing with planned rota)")
     try:
         summary = rt.run_quality_timeline_checks(week_data, friday)
         rt.save_week(friday, week_data)   # dual-writes local + Drive

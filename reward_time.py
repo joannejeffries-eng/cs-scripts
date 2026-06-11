@@ -31,7 +31,7 @@ DB_NAMES = {
     'Erika': 'Erika Frolova', 'Harriet': 'Harriet Clifton-Sprigg',
     'Lizzie': 'Lizzie Williamson', 'Lucy': 'Lucy Riordan',
     'Maisha': 'Maisha Begum', 'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
-    'Tara': 'Tara Dunkley', 'Thea': 'Thea Willsmore',
+    'Tara': 'Tara Dunkley',
     'Harry': 'Harry McNicholas', 'Roseanne': 'Roseanne Brooks-Brown',
 }
 FIRST_NAMES = {v: k for k, v in DB_NAMES.items()}
@@ -39,7 +39,7 @@ FIRST_NAMES = {v: k for k, v in DB_NAMES.items()}
 TL_TEAMS = {
     'Courtney': ['Fionn', 'Kate', 'Becky', 'Jade', 'Elida', 'Harriet', 'Harry'],
     'Yasmin': ['Tara', 'Sophie', 'Noemi', 'Lizzie', 'Kirsty', 'Roseanne'],
-    'Jess': ['Cris', 'Clare', 'Erika', 'Lucy', 'Maisha', 'Thea'],
+    'Jess': ['Cris', 'Clare', 'Erika', 'Lucy', 'Maisha'],
 }
 ALL_AGENTS = sorted(DB_NAMES.keys())
 
@@ -47,7 +47,7 @@ ALL_AGENTS = sorted(DB_NAMES.keys())
 WEEKLY_HOURS = {
     'Becky': 40, 'Kate': 40, 'Fionn': 40, 'Jade': 40, 'Elida': 40,
     'Harriet': 40, 'Cris': 40, 'Clare': 32, 'Erika': 40,
-    'Lucy': 40, 'Maisha': 40, 'Thea': 40, 'Noemi': 40, 'Tara': 22,
+    'Lucy': 40, 'Maisha': 40, 'Noemi': 40, 'Tara': 22,
     'Sophie': 30, 'Kirsty': 40, 'Lizzie': 30,
     'Harry': 40, 'Roseanne': 40,
 }
@@ -133,7 +133,6 @@ REWARD_DAYS = {
     'Maisha':   ('Tue', 'AM'),
     'Becky':    ('Tue', 'PM'),
     'Lucy':     ('Tue', 'PM'),
-    'Thea':     ('Tue', 'PM'),
     'Sophie':   ('Tue', 'PM'),
     'Fionn':    ('Wed', 'AM'),
     'Noemi':    ('Wed', 'AM'),
@@ -165,7 +164,7 @@ STANDARD_SHIFT_HOURS = 8.0  # Full day = 8 productive hours; targets are calibra
 DAILY_HOURS = {
     'Becky': 8, 'Kate': 8, 'Fionn': 8, 'Jade': 8, 'Elida': 8,
     'Harriet': 8, 'Cris': 8, 'Clare': 8, 'Erika': 8, 'Lucy': 8,
-    'Maisha': 8, 'Thea': 8, 'Noemi': 8, 'Kirsty': 8,
+    'Maisha': 8, 'Noemi': 8, 'Kirsty': 8,
     'Tara': 4.5, 'Sophie': 6, 'Lizzie': 6,
     'Harry': 8, 'Roseanne': 8,
 }
@@ -2176,6 +2175,45 @@ def apply_moves_to_day(pw, target_date, moves, *, noise_floor_min=30):
     )
     return {'applied': True, 'reason': 'split applied',
             'segments': segments_spec}
+
+
+def apply_all_moves(week_data, friday):
+    """Fold every captured Slack role-move into the reward week's day shapes.
+
+    For each day in the reward week, loads its moves and runs
+    apply_moves_to_day on (a) everyone with a move that day and (b) anyone
+    who had a prior apply-moves split (so cleared moves collapse the day
+    back to the planned rota). Idempotent — re-runs reflect the current
+    move list without clobbering manual overrides.
+
+    Wired into the daily-actuals cron + Thursday checks so the app + audit
+    sheet always reflect today's moves without needing a manual click.
+
+    Returns a summary list of (name, date, segments) for changed days.
+    """
+    import role_changes as rc
+    changes = []
+    for d in get_weekday_dates(friday):
+        moves = rc.load_moves(d) or []
+        day_tag = d.strftime('%a %d/%m')
+        names_with_moves = {m.get('name') for m in moves if m.get('name')}
+        names_prev_applied = {
+            n for n, pw in week_data.items()
+            if any((o.get('field') or '').startswith(f'apply_moves ({day_tag})')
+                    for o in pw.overrides)
+        }
+        for name in sorted(names_with_moves | names_prev_applied):
+            pw = week_data.get(name)
+            if not pw:
+                continue
+            try:
+                r = apply_moves_to_day(pw, d, moves)
+            except Exception as e:
+                logging.warning(f"apply_all_moves: {name} {d} failed: {e}")
+                continue
+            if r.get('applied'):
+                changes.append((name, d, r.get('segments') or []))
+    return changes
 
 
 # ── Eligibility calculation ─────────────────────────────────────────────────
