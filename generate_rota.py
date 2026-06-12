@@ -450,6 +450,132 @@ def append_daily_notes_rows(gc, rows):
     return len(values)
 
 
+# Sentinel prefix marking a Daily Notes row the role-change daemon authored.
+# Only rows whose Note starts with this are ever managed/removed by the sync —
+# TL- and Jo-authored rows are never touched.
+MOVE_NOTE_SENTINEL = '↪︎ move:'
+
+
+def _move_time_str(m: dict) -> str:
+    """'09:20'–'11:00', or '09:20–end' when the move has no close time yet."""
+    s = (m.get('start_time') or '').strip()
+    e = (m.get('end_time') or '').strip()
+    if s and e:
+        return f"{s}–{e}"
+    if s:
+        return f"{s}–end"
+    return ''
+
+
+def _move_cover_needed(role: str) -> bool:
+    """Same Cover Needed? rule the rota uses (phones / T+LC / T+VC)."""
+    return (role.startswith('Inbound phones')
+            or role == 'Triage + lender chasing'
+            or role == 'Triage and Video Calls')
+
+
+def _dn_time_start(time_str: str) -> str:
+    """Leading HH:MM of a Daily Notes Time cell, e.g. '09:20–11:00' → '09:20'."""
+    import re
+    m = re.match(r'\s*(\d{1,2}:\d{2})', time_str or '')
+    return m.group(1) if m else ''
+
+
+def sync_moves_to_daily_notes(gc, d, moves=None):
+    """Reconcile daemon-authored Daily Notes rows for date `d` against the
+    captured Slack role moves.
+
+    One sentinel-tagged row per 'move' record, matched by (name, start_time):
+      - role/time/cover changed  → update in place
+      - new move                 → append a row
+      - move closed / cleared     → delete the row
+    TL- or Jo-authored rows (no sentinel in the Note column) are never touched.
+    Idempotent — a no-change call writes nothing.
+
+    Returns {'added', 'updated', 'deleted', 'unchanged'}.
+    """
+    import role_changes as rc
+    from gspread.cell import Cell
+    if moves is None:
+        moves = rc.load_moves(d)
+    # Desired daemon rows = every open/closed 'move' for the day.
+    want = {(m['name'], m['start_time']): m
+            for m in moves
+            if m.get('action') == 'move' and m.get('name') and m.get('start_time')}
+
+    ss = open_sheet(gc, EXISTING_ROTA_ID)
+    ws = ss.worksheet("Daily Notes")
+    rows = ws.get_all_values()
+
+    # Existing daemon rows for this date → {(name, start): (row_1based, row)}
+    existing = {}
+    for i, row in enumerate(rows):
+        if i < 4 or len(row) < 5:
+            continue
+        note = (row[4] or '').strip()
+        if not note.startswith(MOVE_NOTE_SENTINEL):
+            continue
+        if _parse_uk_date((row[0] or '').strip()) != d:
+            continue
+        key = ((row[2] or '').strip(), _dn_time_start(row[1] if len(row) > 1 else ''))
+        existing[key] = (i + 1, row)
+
+    def _row_fields(m):
+        role = m.get('to_role', '')
+        return (_move_time_str(m), role,
+                f"{MOVE_NOTE_SENTINEL} from {m.get('from_role') or '—'}",
+                'Yes' if _move_cover_needed(role) else 'No')
+
+    cells, appends, delete_rows = [], [], []
+    added = updated = deleted = unchanged = 0
+
+    for key, (rownum, row) in existing.items():
+        if key in want:
+            new_time, new_role, new_note, new_cover = _row_fields(want[key])
+            cur = ((row[1] or '').strip() if len(row) > 1 else '',
+                   (row[3] or '').strip() if len(row) > 3 else '',
+                   (row[4] or '').strip() if len(row) > 4 else '',
+                   (row[5] or '').strip() if len(row) > 5 else '')
+            if cur == (new_time, new_role, new_note, new_cover):
+                unchanged += 1
+            else:
+                cells.append(Cell(rownum, 2, new_time))   # B Time
+                cells.append(Cell(rownum, 4, new_role))   # D Role
+                cells.append(Cell(rownum, 5, new_note))   # E Note
+                cells.append(Cell(rownum, 6, new_cover))  # F Cover Needed?
+                updated += 1
+        else:
+            delete_rows.append(rownum)   # move closed/cleared → drop the row
+            deleted += 1
+
+    for key, m in want.items():
+        if key in existing:
+            continue
+        role = m.get('to_role', '')
+        appends.append({
+            'date': d, 'time': _move_time_str(m), 'name': m['name'], 'role': role,
+            'note': f"{MOVE_NOTE_SENTINEL} from {m.get('from_role') or '—'}",
+            'cover_needed': _move_cover_needed(role), 'whos_covering': '',
+        })
+        added += 1
+
+    # Order: in-place updates (no shift) → deletes bottom-up → appends at end.
+    if cells:
+        ws.update_cells(cells, value_input_option='USER_ENTERED')
+    if delete_rows:
+        ss.batch_update({'requests': [
+            {'deleteDimension': {'range': {
+                'sheetId': ws.id, 'dimension': 'ROWS',
+                'startIndex': r - 1, 'endIndex': r}}}
+            for r in sorted(delete_rows, reverse=True)
+        ]})
+    if appends:
+        append_daily_notes_rows(gc, appends)
+
+    return {'added': added, 'updated': updated,
+            'deleted': deleted, 'unchanged': unchanged}
+
+
 def get_gspread():
     import gspread
     return gspread.authorize(get_creds())

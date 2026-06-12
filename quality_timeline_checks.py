@@ -9,11 +9,15 @@ work is complete. This script:
      pull misses late-afternoon triage).
   2. run_quality_timeline_checks() — computes the quality + timeline
      SUGGESTIONS per person (archive ratio + Cody compliance; work-activity
-     gaps), pre-filling the tick boxes without clobbering any manual override.
-  3. DMs Jo a summary of who's flagged, ready for Friday review.
+     gaps).
+  3. Pre-fills those suggestions into the Reward Time tracker sheet's TL View
+     (Timeline + Quality columns), only filling blank cells so a TL's own
+     entry is never clobbered. The sheet is the only reward-time interface now
+     the Streamlit app is retired.
+  4. DMs Jo a summary of who's flagged, ready for Friday review.
 
-Everything is saved to local FS + Google Drive (via save_week's dual-write),
-so the suggestions show on both the local and cloud rota apps.
+Suggestions are also saved to local FS + Google Drive (via save_week's
+dual-write) so the Python eligibility gate + Friday send stay in sync.
 
 Runs as a launchd cron (com.juno.cs-quality-timeline-checks) Thu evening.
 Logs to ~/.claude/scheduled-tasks/quality-timeline/checks.log.
@@ -29,6 +33,7 @@ from pathlib import Path
 import requests
 
 from compat import get_slack_token
+import populate_reward_sheet as prs
 import refresh_daemon as rd
 import reward_time as rt
 
@@ -53,7 +58,7 @@ def _dm_jo(text: str) -> None:
         logging.warning(f"DM to Jo blew up: {e}")
 
 
-def _summary_dm(friday, summary) -> str:
+def _summary_dm(friday, summary, sheet_link="") -> str:
     q_flagged = [s for s in summary if not s['quality']]
     t_flagged = [s for s in summary if not s['timeline']]
     lines = [
@@ -69,10 +74,11 @@ def _summary_dm(friday, summary) -> str:
         lines.append("\n*Timeline to review:*")
         for s in t_flagged:
             lines.append(f"• {s['name']} — {s['t_reason']}")
-    lines.append(
-        "\nSuggestions are pre-filled on the Reward Time page — review + "
-        "override before sending Friday."
-    )
+    tail = ("\nSuggestions are pre-filled in the Reward Time tracker (TL View "
+            "Timeline/Quality columns) — review + override there before Friday.")
+    if sheet_link:
+        tail += f"\n{sheet_link}"
+    lines.append(tail)
     return '\n'.join(lines)
 
 
@@ -128,8 +134,19 @@ def main():
                f"```{type(e).__name__}: {e}\n\n{traceback.format_exc()[-500:]}```")
         return
 
-    # ── 3. Heads-up DM ──
-    _dm_jo(_summary_dm(friday, summary))
+    # ── 3. Pre-fill the suggestions into the Reward Time tracker sheet ──
+    # (the sheet is the only reward-time interface now the app is retired).
+    sheet_link = ""
+    try:
+        sheet_id = prs.find_or_copy_sheet(friday)
+        n = prs.prefill_quality_timeline_suggestions(sheet_id, friday)
+        sheet_link = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+        logging.info(f"Pre-filled {n} suggestion cell(s) into {sheet_id}")
+    except Exception:
+        logging.exception("Sheet pre-fill failed (suggestions still saved to state)")
+
+    # ── 4. Heads-up DM ──
+    _dm_jo(_summary_dm(friday, summary, sheet_link))
     duration = (datetime.now() - started).total_seconds()
     logging.info(f"Thursday checks done in {duration:.1f}s — "
                  f"{len(summary)} people")

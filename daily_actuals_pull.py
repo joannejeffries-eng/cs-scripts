@@ -108,6 +108,22 @@ def main():
     except Exception as e:
         logging.exception("apply_all_moves failed (continuing)")
 
+    # ── 2b. Mirror captured moves into the rota Daily Notes ───────────
+    # Catch-up for any moves the role-change daemon missed (e.g. the laptop
+    # was asleep when the move was posted). Idempotent — unchanged days
+    # write nothing. Covers every reward-week weekday up to today.
+    try:
+        import generate_rota as gr
+        today = date.today()
+        gc = gr.get_gspread()
+        for d in rt.get_weekday_dates(friday):
+            if d <= today:
+                res = gr.sync_moves_to_daily_notes(gc, d)
+                if any(res[k] for k in ('added', 'updated', 'deleted')):
+                    logging.info(f"daily-notes sync {d}: {res}")
+    except Exception:
+        logging.exception("daily-notes sync failed (continuing)")
+
     # ── 3. Write the human-readable sheet snapshot ────────────────────
     snapshot_ok = False
     try:

@@ -1,7 +1,16 @@
 """
-CS Rota Manager — Streamlit web app.
+CS Rota Manager — Streamlit web app.  ⚠️ RETIRED (2026-06-12)
 
-Run:  streamlit run rota_app.py
+This app is NO LONGER SERVED. Reward time is now spreadsheet-only: the weekly
+Reward Time Tracker sheet is the interface, the local crons/daemon run headless
+behind it. The launchd agent (com.juno.cs-rota-app) has been removed and
+setup_refresh_daemon.sh no longer installs it.
+
+The file is kept (not deleted) only because `populate_reward_sheet._gspread()`
+still imports `_cached_gspread` from here. Don't rely on the UI. A follow-up can
+move `_cached_gspread` into a small shared module and delete the rest.
+
+Run (legacy, not used):  streamlit run rota_app.py
 """
 import sys
 import streamlit as st

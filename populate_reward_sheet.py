@@ -739,6 +739,59 @@ def update_tl_view_week_label(spreadsheet_id: str, reward_friday: date) -> None:
     ).execute()
 
 
+def prefill_quality_timeline_suggestions(spreadsheet_id: str,
+                                         reward_friday: date) -> int:
+    """Pre-fill the TL View Timeline (N) + Quality (O) cells with the
+    auto-computed suggestions from saved week state, WITHOUT clobbering
+    anything a TL has already entered.
+
+    Suggestions come from `reward_time.run_quality_timeline_checks` (the
+    Thursday cron), stored on each PersonWeek as `timeline_suggested` /
+    `quality_suggested` (True / False / None). We only write into a cell that
+    is currently BLANK — once a TL (or this pre-fill) has put a value there,
+    it's left alone, so a TL's decision is never overwritten. Returns the
+    number of cells written.
+    """
+    week_data = rt.load_week(reward_friday)
+    if not week_data:
+        return 0
+    sheets = _sheets()
+    # Col A resolves =Data!B{r} to the actual names; read alongside the
+    # current Timeline/Quality cells so we can align by row and skip non-blank.
+    res = sheets.spreadsheets().values().batchGet(
+        spreadsheetId=spreadsheet_id,
+        ranges=["'TL View'!A4:A30", "'TL View'!N4:O30"],
+    ).execute()
+    names_block = res["valueRanges"][0].get("values", [])
+    no_block = res["valueRanges"][1].get("values", [])
+    SUG = {True: "✅ Pass", False: "❌ Fail"}
+    updates = []
+    for i, name_row in enumerate(names_block):
+        name = name_row[0].strip() if name_row else ""
+        if not name or name not in week_data:
+            continue  # section headers / strangers
+        pw = week_data[name]
+        if pw.days_worked == 0:
+            continue
+        no = no_block[i] if i < len(no_block) else []
+        n_cur = no[0].strip() if len(no) > 0 and no[0] else ""
+        o_cur = no[1].strip() if len(no) > 1 and no[1] else ""
+        row_num = 4 + i  # A4 is row 4
+        if not n_cur and pw.timeline_suggested in (True, False):
+            updates.append({"range": f"'TL View'!N{row_num}",
+                            "values": [[SUG[pw.timeline_suggested]]]})
+        if not o_cur and pw.quality_suggested in (True, False):
+            updates.append({"range": f"'TL View'!O{row_num}",
+                            "values": [[SUG[pw.quality_suggested]]]})
+    if updates:
+        sheets.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"valueInputOption": "USER_ENTERED", "data": updates},
+        ).execute()
+    logger.info(f"Pre-filled {len(updates)} quality/timeline suggestion cell(s).")
+    return len(updates)
+
+
 def run(reward_friday: date, dm: bool = False) -> str:
     # Pull fresh actuals for the current reward week before reading saved
     # state — keeps ad-hoc / mid-week runs in sync with whatever happened
@@ -775,6 +828,15 @@ def run(reward_friday: date, dm: bool = False) -> str:
     clear_and_write(sheet_id, "Data", build_data_rows(reward_friday))
     clear_and_write(sheet_id, "Split Breakdown",
                      build_split_breakdown_rows(reward_friday))
+
+    # Pre-fill the TL Timeline/Quality suggestion cells from saved state
+    # (set by the Thursday checks). No-clobber: only blank cells are filled,
+    # so a TL's own entry is never overwritten. Safe mid-week — suggestions
+    # are None until the Thursday checks run, so this is a no-op before then.
+    try:
+        prefill_quality_timeline_suggestions(sheet_id, reward_friday)
+    except Exception:
+        logger.exception("prefill_quality_timeline_suggestions failed; continuing")
 
     autoresize_all_columns(sheet_id)
 

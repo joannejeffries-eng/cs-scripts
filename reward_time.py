@@ -98,13 +98,12 @@ def _connect_postgres(db_url):
     except psycopg2.OperationalError as e:
         if running_on_cloud():
             raise CloudDBUnreachableError(
-                "Can't reach the Looker database from Streamlit Cloud — "
-                "it's on Juno's private network and only Jo's laptop "
-                "(on VPN) can connect.\n\n"
-                "👉 Ask Jo to click **🔄 Pull actuals** on her local rota "
-                "app (http://localhost:8501 → Reward Time). The fresh "
-                "numbers and skip counts will appear here within a few "
-                "seconds — the apps share the same state via Drive."
+                "Can't reach the Looker database — it's on Juno's private "
+                "network and only Jo's laptop (on VPN) can connect.\n\n"
+                "👉 Reward-time actuals are pulled by the local daily cron "
+                "(com.juno.cs-daily-actuals) and written to the tracker sheet "
+                "+ Drive state. If figures look stale, run "
+                "`python3 daily_actuals_pull.py` on Jo's laptop (VPN on)."
             ) from e
         raise
 

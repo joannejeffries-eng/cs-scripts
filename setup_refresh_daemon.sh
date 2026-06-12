@@ -1,17 +1,18 @@
 #!/bin/bash
 # One-time setup for the CS launchd agents.
 #
-# Five agents get installed:
+# Four agents get installed:
 #   1. com.juno.cs-refresh-daemon          — pulls Looker actuals on demand (Slack-triggered)
 #   2. com.juno.cs-role-change-daemon      — captures TL-posted role moves (Slack-triggered)
 #   3. com.juno.cs-daily-actuals           — weekday auto-pull at 4 points per day
-#   4. com.juno.cs-rota-app                — Streamlit rota app on http://localhost:8501
-#   5. com.juno.cs-quality-timeline-checks — Thu 18:30 reward quality+timeline checks
+#   4. com.juno.cs-quality-timeline-checks — Thu 18:30 reward quality+timeline checks
 #
-# Long-running services (1, 2, 4) auto-start at every login and restart on crash.
+# (The Streamlit rota app is retired — reward time is now spreadsheet-only.)
+#
+# Long-running services (1, 2) auto-start at every login and restart on crash.
 # The auto-pull (3) fires Mon–Fri at 06:00, 11:00, 13:30 and 15:30.
-# The Thu checks (5) fire Thursday 18:30 (end of the Fri→Thu reward week).
-# Single-shot crons (3, 5) catch up on wake if missed.
+# The Thu checks (4) fire Thursday 18:30 (end of the Fri→Thu reward week).
+# Single-shot crons (3, 4) catch up on wake if missed.
 #
 # What this does:
 #   - Writes your $STAFF_APP_LOOKER_POSTGRES_URL to a file the daemons
@@ -38,14 +39,12 @@ DAEMONS=(
   "com.juno.cs-refresh-daemon"
   "com.juno.cs-role-change-daemon"
   "com.juno.cs-daily-actuals"
-  "com.juno.cs-rota-app"
   "com.juno.cs-quality-timeline-checks"
 )
 
 LOG_DIRS=(
   "$HOME/.claude/scheduled-tasks/refresh-daemon"
   "$HOME/.claude/scheduled-tasks/role-changes"
-  "$HOME/.claude/scheduled-tasks/rota-app"
   "$HOME/.claude/scheduled-tasks/quality-timeline"
 )
 
@@ -93,6 +92,23 @@ fi
 # ── 3. Install + (re)load each daemon ─────────────────────────────────────
 mkdir -p "$HOME/Library/LaunchAgents"
 
+# Retire agents no longer used (e.g. the old Streamlit rota app — reward time
+# is now spreadsheet-only). Unload + remove if present so re-running cleans up.
+RETIRED=(
+  "com.juno.cs-rota-app"
+)
+for label in "${RETIRED[@]}"; do
+  dst="$HOME/Library/LaunchAgents/${label}.plist"
+  if launchctl list | grep -q "$label"; then
+    echo "↺ Retiring $label…"
+    launchctl unload "$dst" 2>/dev/null || true
+  fi
+  if [[ -f "$dst" ]]; then
+    rm -f "$dst"
+    echo "🗑️  Removed $dst"
+  fi
+done
+
 for label in "${DAEMONS[@]}"; do
   src="$REPO_DIR/${label}.plist"
   dst="$HOME/Library/LaunchAgents/${label}.plist"
@@ -115,8 +131,6 @@ done
 
 echo ""
 echo "Test them:"
-echo "  • Rota app:      open http://localhost:8501 in your browser"
-echo "                   (auto-starts on login, restarts on crash)"
 echo "  • Refresh:       post '🔄 refresh' in #dry-run-testing-jo"
 echo "  • Role change:   post 'Maisha to triage' in #dry-run-testing-jo"
 echo "                   (under today's anchor message — daemon posts it on first weekday poll;"
