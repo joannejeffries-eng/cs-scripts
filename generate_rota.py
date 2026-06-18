@@ -58,19 +58,19 @@ SEC_EMAIL = 'Email Health'
 # ── Team data (from TL_CALC_TEAMS in setup_tl_view.py) ─────────────────────
 DB_NAMES = {
     'Becky': 'Becky Smith', 'Elida': 'Elida Gizli', 'Fionn': 'Fionn Burrows',
-    'Jade': 'Jade Regent', 'Kate': "Kate O'Neill", 'Kirsty': 'Kirsty Rowley',
+    'Kate': "Kate O'Neill", 'Kirsty': 'Kirsty Rowley',
     'Clare': 'Clare Brown', 'Cris': 'Cris Macagi',
     'Erika': 'Erika Frolova', 'Harriet': 'Harriet Clifton-Sprigg',
     'Lizzie': 'Lizzie Williamson', 'Lucy': 'Lucy Riordan',
-    'Maisha': 'Maisha Begum', 'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
+    'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
     'Tara': 'Tara Dunkley',
     'Harry': 'Harry McNicholas', 'Roseanne': 'Roseanne Brooks-Brown',
 }
 
 TL_TEAMS = {
-    'Courtney': ['Fionn', 'Kate', 'Becky', 'Jade', 'Elida', 'Harriet', 'Harry'],
+    'Courtney': ['Fionn', 'Kate', 'Becky', 'Elida', 'Harriet', 'Harry'],
     'Yasmin': ['Tara', 'Sophie', 'Noemi', 'Lizzie', 'Kirsty', 'Roseanne'],
-    'Jess': ['Cris', 'Clare', 'Erika', 'Lucy', 'Maisha'],
+    'Jess': ['Cris', 'Clare', 'Erika', 'Lucy'],
 }
 
 ALL_TLS = ['Yasmin', 'Courtney', 'Jess']
@@ -149,14 +149,11 @@ DEFAULT_ROLE_TARGETS = [
 DEFAULT_SKILLS = {
     'Becky':   {'Inbound', 'Uncat', 'Call&Chase', 'LMS/LE', 'Email Health'},
     'Fionn':   {'Inbound', 'Uncat', 'Verify Addr'},
-    'Jade':    {'Inbound', 'LMS/LE', 'Email Health'},
     'Kate':    {'Inbound', 'Uncat', 'Webchat', 'E-sign', 'LMS/LE'},
     'Elida':   {'Inbound', 'Uncat', 'Missed Calls'},
     'Harriet': {'Inbound', 'Webchat', 'LMS/LE', 'Missed Calls'},
     'Cris':    {'Triage', 'Uncat', 'Lender Chase', 'Verify Addr', 'Call&Chase',
                 'E-sign', 'LMS/LE', 'Video', 'ID Checks', 'ICS'},
-    'Maisha':  {'Triage', 'Inbound', 'Lender Chase', 'Verify Addr', 'Call&Chase',
-                'E-sign', 'ID Checks', 'ICS'},
     'Erika':   {'Triage', 'Inbound', 'Uncat', 'Webchat', 'Verify Addr', 'Call&Chase',
                 'E-sign', 'LMS/LE', 'ID Checks'},
     'Clare':   {'Triage', 'Webchat', 'Lender Chase', 'Verify Addr',
@@ -179,14 +176,12 @@ DEFAULT_HOURS = {
     'Becky':   {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Kate':    {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Fionn':   {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
-    'Jade':    {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Elida':   {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Harriet': {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Cris':    {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Clare':   {0: 0, 1: 8, 2: 8, 3: 8, 4: 8},
     'Erika':   {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Lucy':    {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
-    'Maisha':  {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Noemi':   {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Tara':    {0: 4.5, 1: 4.5, 2: 4.5, 3: 4.5, 4: 4},
     'Sophie':  {0: 6, 1: 6, 2: 6, 3: 6, 4: 6},
@@ -204,14 +199,12 @@ DEFAULT_SHIFTS = {
     'Becky':   (9, 17.5),    # 9-5:30 (or 8:30-5, varies)
     'Kate':    (9, 17.5),    # 9-5:30
     'Fionn':   (8, 17),      # 8-5
-    'Jade':    (9, 18),      # 9-6
     'Elida':   (8, 17),      # 8-5
     'Harriet': (8, 17),      # 8-5
     'Cris':    (8, 17),      # 8-5
     'Clare':   (8, 17),      # 8-5 (off Mon)
     'Erika':   (8, 17),      # 8-5
     'Lucy':    (9, 18),      # 9-6 (assumed standard new starter)
-    'Maisha':  (9, 18),      # 9-6
     'Noemi':   (9, 18),      # 9-6
     'Tara':    (9, 13.5),    # ~4.5h (approx 9-1:30)
     'Sophie':  (7, 15),      # 7-8 + 9:30-3 (split — gap 8-9:30)
@@ -234,7 +227,6 @@ DEFAULT_ASSIGNMENTS = {
     'Kate':    (ROLE_PHONES, True, SEC_WEBCHAT),
     'Fionn':   (ROLE_PHONES, True, SEC_UNCAT),
     'Elida':   (ROLE_PHONES, True, SEC_MISSED),
-    'Jade':    (ROLE_PHONES, True, SEC_EMAIL),
     'Noemi':   (ROLE_TRIAGE, True, ''),
     'Kirsty':  (ROLE_TRIAGE, True, ''),
     'Lizzie':  (ROLE_TRIAGE, True, ''),

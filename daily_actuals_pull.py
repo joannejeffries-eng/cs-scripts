@@ -101,18 +101,25 @@ def main():
     try:
         friday = result['friday']
         week_data = rt.load_week(friday)
-        # Fold reward-time / appointment slots from Daily Notes FIRST (headless
-        # replacement for the retired 'Resync from notes' button), so the moves
-        # compose around those protected segments.
+        # Rebuild each day in layers, rota first:
+        #   1. sync_rota_from_sheet — roles/absences from the canonical rota
+        #      (headless 'Sync rota'; resets splits so a stale base can't survive)
+        #   2. resync_from_daily_notes — reward-time / appointment slots
+        #   3. apply_all_moves — captured Slack role moves
+        # Each layer composes on the previous one.
+        try:
+            rt.sync_rota_from_sheet(week_data, friday)
+        except Exception:
+            logging.exception("sync_rota_from_sheet failed (continuing)")
         try:
             rt.resync_from_daily_notes(week_data, friday)
         except Exception:
             logging.exception("resync_from_daily_notes failed (continuing)")
         move_changes = rt.apply_all_moves(week_data, friday)
         rt.save_week(friday, week_data)
-        logging.info(f"resynced notes + applied {len(move_changes)} move-derived day shape(s)")
+        logging.info(f"synced rota + notes + applied {len(move_changes)} move-derived day shape(s)")
     except Exception as e:
-        logging.exception("apply_all_moves/resync failed (continuing)")
+        logging.exception("rota/notes/moves sync failed (continuing)")
 
     # ── 2b. Mirror captured moves into the rota Daily Notes ───────────
     # Catch-up for any moves the role-change daemon missed (e.g. the laptop

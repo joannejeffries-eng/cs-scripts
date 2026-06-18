@@ -26,28 +26,28 @@ FULL_TIME_HOURS = 40  # Weekly hours for full-time
 # ── Name mappings (first name -> DB full name) ──────────────────────────────
 DB_NAMES = {
     'Becky': 'Becky Smith', 'Elida': 'Elida Gizli', 'Fionn': 'Fionn Burrows',
-    'Jade': 'Jade Regent', 'Kate': "Kate O'Neill", 'Kirsty': 'Kirsty Rowley',
+    'Kate': "Kate O'Neill", 'Kirsty': 'Kirsty Rowley',
     'Clare': 'Clare Brown', 'Cris': 'Cris Macagi',
     'Erika': 'Erika Frolova', 'Harriet': 'Harriet Clifton-Sprigg',
     'Lizzie': 'Lizzie Williamson', 'Lucy': 'Lucy Riordan',
-    'Maisha': 'Maisha Begum', 'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
+    'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
     'Tara': 'Tara Dunkley',
     'Harry': 'Harry McNicholas', 'Roseanne': 'Roseanne Brooks-Brown',
 }
 FIRST_NAMES = {v: k for k, v in DB_NAMES.items()}
 
 TL_TEAMS = {
-    'Courtney': ['Fionn', 'Kate', 'Becky', 'Jade', 'Elida', 'Harriet', 'Harry'],
+    'Courtney': ['Fionn', 'Kate', 'Becky', 'Elida', 'Harriet', 'Harry'],
     'Yasmin': ['Tara', 'Sophie', 'Noemi', 'Lizzie', 'Kirsty', 'Roseanne'],
-    'Jess': ['Cris', 'Clare', 'Erika', 'Lucy', 'Maisha'],
+    'Jess': ['Cris', 'Clare', 'Erika', 'Lucy'],
 }
 ALL_AGENTS = sorted(DB_NAMES.keys())
 
 # ── Weekly hours per person (for pro-rata) ──────────────────────────────────
 WEEKLY_HOURS = {
-    'Becky': 40, 'Kate': 40, 'Fionn': 40, 'Jade': 40, 'Elida': 40,
+    'Becky': 40, 'Kate': 40, 'Fionn': 40, 'Elida': 40,
     'Harriet': 40, 'Cris': 40, 'Clare': 32, 'Erika': 40,
-    'Lucy': 40, 'Maisha': 40, 'Noemi': 40, 'Tara': 22,
+    'Lucy': 40, 'Noemi': 40, 'Tara': 22,
     'Sophie': 30, 'Kirsty': 40, 'Lizzie': 30,
     'Harry': 40, 'Roseanne': 40,
 }
@@ -128,8 +128,6 @@ STRETCH_BONUS_HOURS = 1.0
 # ── Reward day assignments ──────────────────────────────────────────────────
 # {name: (day_name, block)} — day_name is 'Tue','Wed','Thu'; block is 'AM' or 'PM'
 REWARD_DAYS = {
-    'Jade':     ('Tue', 'AM'),
-    'Maisha':   ('Tue', 'AM'),
     'Becky':    ('Tue', 'PM'),
     'Lucy':     ('Tue', 'PM'),
     'Sophie':   ('Tue', 'PM'),
@@ -149,7 +147,7 @@ REWARD_DAYS = {
 }
 # Harry starts 2026-06-01, Roseanne 2026-06-10 — blocks assigned now; they won't
 # appear in the weekly reward message until they have worked days (days_worked > 0).
-# Phones team: Jade, Becky, Kate, Fionn, Kirsty, Elida
+# Phones team: Becky, Kate, Fionn, Kirsty, Elida
 # Phones can only swap with phones
 
 DAY_NAME_TO_IDX = {'Mon': 0, 'Tue': 1, 'Wed': 2, 'Thu': 3, 'Fri': 4}
@@ -161,9 +159,9 @@ STANDARD_SHIFT_HOURS = 8.0  # Full day = 8 productive hours; targets are calibra
 
 # Per-person daily hours (mirrors generate_rota DEFAULT_HOURS)
 DAILY_HOURS = {
-    'Becky': 8, 'Kate': 8, 'Fionn': 8, 'Jade': 8, 'Elida': 8,
+    'Becky': 8, 'Kate': 8, 'Fionn': 8, 'Elida': 8,
     'Harriet': 8, 'Cris': 8, 'Clare': 8, 'Erika': 8, 'Lucy': 8,
-    'Maisha': 8, 'Noemi': 8, 'Kirsty': 8,
+    'Noemi': 8, 'Kirsty': 8,
     'Tara': 4.5, 'Sophie': 6, 'Lizzie': 6,
     'Harry': 8, 'Roseanne': 8,
 }
@@ -466,7 +464,7 @@ LUNCH_BAND = ('12:00', '14:00')
 # (weekday Mon=0…Fri=4, start 'HH:MM', end 'HH:MM').
 ONE_TO_ONE_SLOTS = {
     # Courtney's team — Wednesday
-    'Elida':   (2, '09:00', '10:00'), 'Jade': (2, '09:00', '10:00'),
+    'Elida':   (2, '09:00', '10:00'),
     'Harry':   (2, '09:00', '10:00'),
     'Harriet': (2, '10:30', '11:30'), 'Becky': (2, '10:30', '11:30'),
     'Fionn':   (2, '10:30', '11:30'), 'Kate':  (2, '10:30', '11:30'),
@@ -477,7 +475,7 @@ ONE_TO_ONE_SLOTS = {
     'Lizzie':  (3, '10:30', '11:30'),
     # Jess's team — Wednesday
     'Lucy':    (2, '09:00', '10:00'), 'Erika': (2, '09:00', '10:00'),
-    'Cris':    (2, '10:30', '11:30'), 'Maisha': (2, '10:30', '11:30'),
+    'Cris':    (2, '10:30', '11:30'),
     'Clare':   (2, '10:30', '11:30'),
 }
 
@@ -1309,8 +1307,18 @@ def _role_category(role):
     return s
 
 
-def sync_rota_into_week(week_data, friday, assignments_fri=None, assignments_mon_thu=None):
+def sync_rota_into_week(week_data, friday, assignments_fri=None, assignments_mon_thu=None,
+                        reset_segments=False):
     """Overlay the current rota onto an existing week without losing TL inputs.
+
+    reset_segments=True: do NOT preserve existing splits — reset every working
+    day to the rota's single role. Used by the headless daily sync, where
+    resync_from_daily_notes (reward-time/appointments) and apply_all_moves
+    (Slack moves) run straight after and rebuild the splits from scratch. This
+    avoids a stale base role being kept just because its role *category* still
+    matches (e.g. a leftover 'Triage and Video Calls' segment surviving a
+    change to 'Triage only', which have different targets).
+
 
     Updates each day's role / is_working / shift_hours / targets to match the
     rota. Preserves: dr.metrics (actuals), pw.quality_ok, pw.timeline_ok,
@@ -1389,7 +1397,7 @@ def sync_rota_into_week(week_data, friday, assignments_fri=None, assignments_mon
                 # all collapse to 'Triage').
                 new_cat = _role_category(new_role)
                 keep_splits = False
-                if dr.segments:
+                if not reset_segments and dr.segments:
                     for seg in dr.segments:
                         if _role_category(seg.role) == new_cat:
                             keep_splits = True
@@ -1733,6 +1741,33 @@ def resync_autofilled_splits_from_notes(week_data, notes_by_date):
         'reverted': reverted,
         'applied': reward_results + appt_results,
     }
+
+
+def sync_rota_from_sheet(week_data, friday):
+    """Overlay the current canonical rota (roles + absences) onto the reward
+    week, preserving actuals / quality_ok / timeline_ok / overrides.
+
+    Headless equivalent of the retired app's 'Sync rota' button — keeps the
+    reward week in step with mid-week rota edits (role swaps, absences, a
+    stale AL carried over from a prior week). The Fri→Thu reward week spans
+    two rota weeks: Friday comes from the week of `friday`'s Monday; Mon–Thu
+    from the following Monday. Reads via generate_rota.read_original_rota.
+
+    Runs with reset_segments=True, so call it BEFORE resync_from_daily_notes
+    + apply_all_moves — those rebuild the reward-time/appointment and move
+    splits on top of the clean rota base. Only touches people already in
+    week_data (leavers removed from the roster won't be re-added).
+    Returns the sync_rota_into_week change list.
+    """
+    import generate_rota as gr
+    from datetime import timedelta
+    gc = gr.get_gspread()
+    fri_monday = friday - timedelta(days=friday.weekday())   # Mon of Friday's week
+    mon_thu_monday = friday + timedelta(days=3)              # Mon of the Mon–Thu portion
+    assignments_fri, _ = gr.read_original_rota(gc, fri_monday)
+    assignments_mon_thu, _ = gr.read_original_rota(gc, mon_thu_monday)
+    return sync_rota_into_week(week_data, friday, assignments_fri, assignments_mon_thu,
+                               reset_segments=True)
 
 
 def resync_from_daily_notes(week_data, friday):

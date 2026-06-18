@@ -46,7 +46,7 @@ JO_USER_ID = "U07KFSSCUNT"
 
 # Order Data + TL View rows so the 6 Core Phones land in the first 6
 # Core Phones section rows. Wider Team follows alphabetically.
-CORE_PHONES_ORDER = ["Jade", "Harry", "Kate", "Becky", "Elida", "Fionn"]
+CORE_PHONES_ORDER = ["Harry", "Kate", "Becky", "Elida", "Fionn"]
 
 LOG_DIR = Path.home() / ".juno/scheduled-tasks/reward-sheet"
 LOG_FILE = LOG_DIR / "populate.log"
