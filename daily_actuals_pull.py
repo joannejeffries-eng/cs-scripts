@@ -101,12 +101,18 @@ def main():
     try:
         friday = result['friday']
         week_data = rt.load_week(friday)
+        # Fold reward-time / appointment slots from Daily Notes FIRST (headless
+        # replacement for the retired 'Resync from notes' button), so the moves
+        # compose around those protected segments.
+        try:
+            rt.resync_from_daily_notes(week_data, friday)
+        except Exception:
+            logging.exception("resync_from_daily_notes failed (continuing)")
         move_changes = rt.apply_all_moves(week_data, friday)
-        if move_changes:
-            rt.save_week(friday, week_data)
-            logging.info(f"applied {len(move_changes)} move-derived day shape(s)")
+        rt.save_week(friday, week_data)
+        logging.info(f"resynced notes + applied {len(move_changes)} move-derived day shape(s)")
     except Exception as e:
-        logging.exception("apply_all_moves failed (continuing)")
+        logging.exception("apply_all_moves/resync failed (continuing)")
 
     # ── 2b. Mirror captured moves into the rota Daily Notes ───────────
     # Catch-up for any moves the role-change daemon missed (e.g. the laptop

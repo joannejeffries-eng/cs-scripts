@@ -115,8 +115,13 @@ def main():
     if not week_data:
         _dm_jo("ℹ️ Thursday reward checks — no saved reward week to check yet.")
         return
-    # Fold the week's Slack moves in first so the checks see the actual day
-    # shapes (not stale planned-rota single roles).
+    # Fold reward-time/appointment slots from Daily Notes, then the week's
+    # Slack moves, so the checks see the actual day shapes (not stale
+    # planned-rota single roles).
+    try:
+        rt.resync_from_daily_notes(week_data, friday)
+    except Exception:
+        logging.exception("resync_from_daily_notes failed (continuing)")
     try:
         rt.apply_all_moves(week_data, friday)
     except Exception:

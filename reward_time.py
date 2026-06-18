@@ -1735,6 +1735,29 @@ def resync_autofilled_splits_from_notes(week_data, notes_by_date):
     }
 
 
+def resync_from_daily_notes(week_data, friday):
+    """Read the reward week's Daily Notes and fold any reward-time / appointment
+    slots into week_data (idempotent two-way sync).
+
+    Headless equivalent of the retired app's 'Resync from notes' button —
+    builds notes_by_date across the (up to two) calendar weeks the Fri→Thu
+    reward week spans, then calls resync_autofilled_splits_from_notes.
+    Run this BEFORE apply_all_moves so moves compose around the protected
+    reward-time/appointment segments. Returns the resync result.
+    """
+    import generate_rota as gr
+    from datetime import timedelta
+    gc = gr.get_gspread()
+    notes_by_date = {}
+    seen = {}
+    for d in get_weekday_dates(friday):
+        mon = d - timedelta(days=d.weekday())
+        if mon not in seen:
+            seen[mon] = gr.read_daily_notes(gc, mon)
+        notes_by_date[d] = seen[mon].get(d.weekday(), [])
+    return resync_autofilled_splits_from_notes(week_data, notes_by_date)
+
+
 def _role_needs_cover(role: str) -> bool:
     """Cover is only required for Inbound phones or Triage + lender chasing.
 
@@ -2092,26 +2115,52 @@ def apply_moves_to_day(pw, target_date, moves, *, noise_floor_min=30):
 
     old_label = dr.role
 
-    # Gather this person's qualifying moves.
-    person_moves = []
+    # Gather this person's qualifying moves. Open-ended moves (no end time)
+    # run until the next move's start, or to the end of their shift — the same
+    # way the live rota interprets them. Without this they'd be dropped, so a
+    # 'Clare to chasing 09:20' with no close time never reached the tracker.
+    import generate_rota as _gr
+    _shift_win = _gr.DEFAULT_SHIFTS.get(pw.name)
+    shift_end_min = int(_shift_win[1] * 60) if _shift_win else None
+
+    raw = []
     for m in moves:
         if m.get('name') != pw.name:
             continue
         if m.get('action') not in (None, 'move'):
             continue
         start = m.get('start_time') or ''
-        end = m.get('end_time') or ''
-        if ':' not in start or ':' not in end:
+        if ':' not in start:
             continue
         try:
             sh, sm = (int(p) for p in start.split(':'))
-            eh, em = (int(p) for p in end.split(':'))
         except ValueError:
             continue
-        dur_min = (eh * 60 + em) - (sh * 60 + sm)
+        end = m.get('end_time') or ''
+        end_min = None
+        if ':' in end:
+            try:
+                eh, em = (int(p) for p in end.split(':'))
+                end_min = eh * 60 + em
+            except ValueError:
+                end_min = None
+        raw.append({'start_min': sh * 60 + sm, 'end_min': end_min,
+                    'to_role': m.get('to_role')})
+
+    raw.sort(key=lambda x: x['start_min'])
+    person_moves = []
+    for i, mv in enumerate(raw):
+        end_min = mv['end_min']
+        if end_min is None:   # open-ended → next move's start, else shift end
+            nxt = next((r['start_min'] for r in raw[i + 1:]
+                        if r['start_min'] > mv['start_min']), None)
+            end_min = nxt if nxt is not None else shift_end_min
+        if end_min is None:
+            continue   # open move + unknown shift end — can't size it
+        dur_min = end_min - mv['start_min']
         if dur_min < noise_floor_min:
             continue
-        person_moves.append({'to_role': m.get('to_role'), 'duration_min': dur_min})
+        person_moves.append({'to_role': mv['to_role'], 'duration_min': dur_min})
 
     # No qualifying moves now.
     if not person_moves:
