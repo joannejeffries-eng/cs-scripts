@@ -1151,6 +1151,8 @@ def generate_week(monday, people, role_targets=None, tl_rotation=None,
 
     # ── Pre-fill: absences, NWD, training ──
     for name, abs_days in known_absences.items():
+        if name not in assignments:
+            continue  # original rota may list people not in the test roster (e.g. hidden leavers)
         for di, role_str in abs_days.items():
             if di in working_days:
                 assignments[name][di] = role_str
@@ -1823,7 +1825,14 @@ def write_lunch_rota(gc, sheet_id, lunch_rota, monday):
 
 
 def write_daily_notes(gc, sheet_id, monday):
-    """Write empty Daily Notes tab in fill_tracker.py-compatible format."""
+    """Write the Daily Notes tab, mirroring the live rota's notes for the week.
+
+    Copies the original rota's Daily Notes context (absences, appointments,
+    reward time, cover) so the test rota carries the same givens for a fair
+    side-by-side. Daemon-authored move rows (note starts with the move
+    sentinel) are skipped — the test rota has its own role allocation, so the
+    original's mid-week moves don't belong on it. Falls back to blank date
+    rows for any day the original has no notes."""
     ss = open_sheet(gc, sheet_id)
     try:
         ws = ss.worksheet("Daily Notes")
@@ -1831,21 +1840,35 @@ def write_daily_notes(gc, sheet_id, monday):
         ws = ss.add_worksheet("Daily Notes", rows=50, cols=8)
 
     data = [
-        ['DAILY NOTES — Edit this tab to record absences, appointments and cover during the week'],
+        ['DAILY NOTES — mirrored from the live rota for side-by-side comparison'],
         [f'Week commencing: {monday.strftime("%d/%m/%Y")}'],
-        ['Add a row for each absence or appointment. "Cover Needed?" triggers only for Inbound phones or lender chasing roles. This tab feeds into the reward tracker for pro-rata calculations.'],
+        ['Absences, appointments and reward time copied from the live rota. "Cover Needed?" triggers only for Inbound phones or lender chasing roles. Feeds the reward tracker for pro-rata.'],
         ['Date', 'Time', 'Name', 'Scheduled role for the day', 'Note',
          'Cover Needed?', "Who's covering?"],
     ]
-    # Pre-fill date rows for each day
+    try:
+        orig = read_daily_notes(gc, monday)  # original rota (EXISTING_ROTA_ID)
+    except Exception:
+        orig = {}
+    copied = 0
     for day_idx in range(5):
         day_date = monday + timedelta(days=day_idx)
         date_str = f"{day_date.day}/{day_date.month}/{str(day_date.year)[-2:]}"
-        data.append([date_str, '', '', '', '', '', ''])
+        rows = [e for e in orig.get(day_idx, [])
+                if not (e.get('note') or '').strip().startswith(MOVE_NOTE_SENTINEL)]
+        if rows:
+            for e in rows:
+                data.append([date_str, e.get('time', ''), e.get('name', ''),
+                             e.get('role', ''), e.get('note', ''),
+                             'Yes' if e.get('cover_needed') else 'No',
+                             e.get('whos_covering', '')])
+                copied += 1
+        else:
+            data.append([date_str, '', '', '', '', '', ''])
 
     ws.clear()
     ws.update(range_name='A1', values=data)
-    print(f"  Wrote Daily Notes (empty template)")
+    print(f"  Wrote Daily Notes (mirrored {copied} note row(s) from the live rota)")
 
 
 def write_overrides(gc, sheet_id):
