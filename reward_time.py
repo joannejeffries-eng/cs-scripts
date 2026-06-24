@@ -1616,6 +1616,81 @@ def autofill_appointment_splits_from_notes(week_data, notes_by_date):
     )
 
 
+_HALF_DAY_KEYWORDS = ('half day', 'half-day', 'al half')
+
+
+def autofill_half_day_from_notes(week_data, notes_by_date):
+    """Pro-rate shift hours for AL half-day entries in Daily Notes.
+
+    Unlike reward-time / appointment autofills (which split the working day
+    into segments), a half day reduces the working block itself: the rest of
+    the day was AL, so the person was off the button for those hours. We
+    use the Daily Notes time range as the working hours and call
+    adjust_shift_hours, which recomputes the pro-rated target.
+
+    Idempotent + bi-directional:
+      - notes match → shift_hours snapped to the time range
+      - notes no longer match → shift_hours restored to the person's normal
+        daily hours (so removing a stale half-day note also reverts)
+
+    Reverts on REMOVAL are only triggered when there's a recorded override
+    whose reason starts with 'Autofilled half-day' — TL-applied manual
+    shift adjustments are never touched.
+
+    Returns: [{'name', 'date', 'hours', 'status': 'applied'|'reverted'|'skipped', 'reason'}]
+    """
+    half_days = {}
+    for d, entries in notes_by_date.items():
+        for entry in entries:
+            note = (entry.get('note') or '').strip().lower()
+            if not any(k in note for k in _HALF_DAY_KEYWORDS):
+                continue
+            name = (entry.get('name') or '').strip()
+            hours = parse_time_range_hours(entry.get('time') or '')
+            if hours and hours > 0:
+                half_days[(name, d)] = hours
+
+    results = []
+    for name, pw in week_data.items():
+        full_day = DAILY_HOURS.get(name, STANDARD_SHIFT_HOURS)
+        for d, dr in pw.days.items():
+            if not dr.is_working:
+                continue
+            note_hours = half_days.get((name, d))
+            already_autofilled = any(
+                (ov.get('reason') or '').startswith('Autofilled half-day')
+                and ov.get('field', '').endswith(f"({d.strftime('%a %d/%m')})")
+                for ov in pw.overrides
+            )
+
+            if note_hours is not None:
+                if abs(dr.shift_hours - note_hours) < 0.1:
+                    continue   # already at target hours
+                if note_hours >= full_day - 0.1:
+                    results.append({'name': name, 'date': d, 'hours': note_hours,
+                                    'status': 'skipped',
+                                    'reason': f"{note_hours}h ≥ full day"})
+                    continue
+                old_hours = dr.shift_hours
+                adjust_shift_hours(pw, d, note_hours, actuals=dr.metrics)
+                add_override(pw, f'shift hours ({d.strftime("%a %d/%m")})',
+                              old_hours, note_hours,
+                              f"Autofilled half-day from Daily Notes: working block {note_hours}h")
+                results.append({'name': name, 'date': d, 'hours': note_hours,
+                                'status': 'applied',
+                                'reason': f"shift {note_hours}h"})
+            elif already_autofilled and abs(dr.shift_hours - full_day) > 0.1:
+                old_hours = dr.shift_hours
+                adjust_shift_hours(pw, d, full_day, actuals=dr.metrics)
+                add_override(pw, f'shift hours ({d.strftime("%a %d/%m")})',
+                              old_hours, full_day,
+                              "Half-day note removed; restored full shift hours")
+                results.append({'name': name, 'date': d, 'hours': full_day,
+                                'status': 'reverted',
+                                'reason': f"shift {full_day}h"})
+    return results
+
+
 def resync_autofilled_splits_from_notes(week_data, notes_by_date):
     """Two-way sync: revert stale autofilled splits + apply current ones.
 
@@ -1771,14 +1846,16 @@ def sync_rota_from_sheet(week_data, friday):
 
 
 def resync_from_daily_notes(week_data, friday):
-    """Read the reward week's Daily Notes and fold any reward-time / appointment
-    slots into week_data (idempotent two-way sync).
+    """Read the reward week's Daily Notes and fold any half-day / reward-time
+    / appointment markers into week_data (idempotent two-way sync).
 
     Headless equivalent of the retired app's 'Resync from notes' button —
     builds notes_by_date across the (up to two) calendar weeks the Fri→Thu
-    reward week spans, then calls resync_autofilled_splits_from_notes.
-    Run this BEFORE apply_all_moves so moves compose around the protected
-    reward-time/appointment segments. Returns the resync result.
+    reward week spans, then applies half-day shift adjustments (which must
+    run BEFORE reward-time/appointment splits, so those splits sit inside
+    the correctly-sized working block) followed by reward-time + appointment
+    autofills. Run this BEFORE apply_all_moves so moves compose around the
+    protected segments. Returns the resync result.
     """
     import generate_rota as gr
     from datetime import timedelta
@@ -1790,7 +1867,10 @@ def resync_from_daily_notes(week_data, friday):
         if mon not in seen:
             seen[mon] = gr.read_daily_notes(gc, mon)
         notes_by_date[d] = seen[mon].get(d.weekday(), [])
-    return resync_autofilled_splits_from_notes(week_data, notes_by_date)
+    half_day_result = autofill_half_day_from_notes(week_data, notes_by_date)
+    split_result = resync_autofilled_splits_from_notes(week_data, notes_by_date)
+    split_result['half_day'] = half_day_result
+    return split_result
 
 
 def _role_needs_cover(role: str) -> bool:

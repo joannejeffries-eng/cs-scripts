@@ -143,11 +143,34 @@ def _push_week_to_drive(friday: date) -> None:
     drive_write_json(rt._week_filename(friday), data)
 
 
+def _bootstrap_week(friday) -> dict:
+    """Build a fresh week from the canonical rota and save it.
+
+    Used when refresh_now() finds no saved state. Replaces the manual
+    'open the rota app once' step that the retired Streamlit app provided.
+    The reward week (Fri→Thu) spans two rota weeks: Friday from the rota
+    week containing it, Mon–Thu from the following rota week."""
+    from datetime import timedelta
+    import generate_rota as gr
+    fri_monday = friday - timedelta(days=friday.weekday())
+    mon_thu_monday = fri_monday + timedelta(days=7)
+    gc = gr.get_gspread()
+    assignments_fri, _ = gr.read_original_rota(gc, fri_monday)
+    assignments_mon_thu, _ = gr.read_original_rota(gc, mon_thu_monday)
+    return rt.build_week(
+        friday,
+        assignments_fri=assignments_fri,
+        assignments_mon_thu=assignments_mon_thu,
+    )
+
+
 def refresh_now() -> dict:
     """Run pull_day_data + pull_skips for the current reward week.
 
     Writes the updated state to both local FS (via save_week) AND Google
-    Drive (so the cloud rota app sees it).
+    Drive (so the cloud rota app sees it). If no saved state exists for
+    the week (e.g. first run of a new reward week now the Streamlit app
+    is retired) it auto-bootstraps from the canonical rota.
 
     Returns a small dict summarising what was refreshed — used to build
     the thread-reply text."""
@@ -161,10 +184,11 @@ def refresh_now() -> dict:
                  'note': 'No elapsed working days in this reward week yet.'}
 
     week_data = rt.load_week(friday)
+    bootstrapped = False
     if not week_data:
-        return {'friday': friday, 'days': [], 'people': 0,
-                 'note': "No saved state for this reward week — open the "
-                          "rota app once first to initialise it."}
+        week_data = _bootstrap_week(friday)
+        rt.save_week(friday, week_data)
+        bootstrapped = True
 
     for d in targets:
         actuals = rt.pull_day_data(d)
@@ -177,7 +201,8 @@ def refresh_now() -> dict:
     rt.save_week(friday, week_data)   # local
     _push_week_to_drive(friday)        # Drive
 
-    return {'friday': friday, 'days': targets, 'people': len(week_data)}
+    return {'friday': friday, 'days': targets, 'people': len(week_data),
+            'bootstrapped': bootstrapped}
 
 
 def _format_summary(result: dict) -> str:
