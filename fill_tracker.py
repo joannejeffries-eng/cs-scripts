@@ -24,12 +24,12 @@ OUTPUT_DIR = Path.home() / 'Downloads'
 DB_URL = os.environ['STAFF_APP_LOOKER_POSTGRES_URL']
 
 # Tracker agents (in order they appear in the spreadsheet)
-CORE_PHONES = ['Becky', 'Elida', 'Fionn', 'Jade', 'Kate']
+CORE_PHONES = ['Becky', 'Elida', 'Fionn', 'Kate']
 # Harry (Courtney) joined the reward tracker 2026-06-11; Roseanne (Yasmin)
 # from 2026-06-11. Charne kept in the list — her column is hidden on the
 # live tracker.
 WIDER_TEAM = ['Charne', 'Clare', 'Cris', 'Erika', 'Harriet', 'Harry',
-              'Kirsty', 'Lizzie', 'Lucy', 'Maisha', 'Noemi', 'Roseanne',
+              'Kirsty', 'Lizzie', 'Lucy', 'Noemi', 'Roseanne',
               'Sophie', 'Tara']
 ALL_AGENTS = CORE_PHONES + WIDER_TEAM
 
@@ -38,7 +38,6 @@ DB_NAMES = {
     'Becky': 'Becky Smith',
     'Elida': 'Elida Gizli',
     'Fionn': 'Fionn Burrows',
-    'Jade': 'Jade Regent',
     'Kate': "Kate O'Neill",
     'Kirsty': 'Kirsty Rowley',
     'Charne': 'Charne Wilson',
@@ -48,7 +47,6 @@ DB_NAMES = {
     'Harriet': 'Harriet Clifton-Sprigg',
     'Lizzie': 'Lizzie Williamson',
     'Lucy': 'Lucy Riordan',
-    'Maisha': 'Maisha Begum',
     'Noemi': 'Noemi Sip',
     'Harry': 'Harry McNicholas',
     'Roseanne': 'Roseanne Brooks-Brown',

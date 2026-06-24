@@ -14,19 +14,19 @@ from pathlib import Path
 CREDS_PATH = Path.home() / '.config/juno/claude-code/google-credentials.json'
 
 # Agent layout matches fill_tracker.py
-# Data tab rows: Core Phones start at row 4 (1-indexed), Wider Team at row 10
-# (row 9 is the "WIDER TEAM" section header)
-CORE_PHONES_DATA_ROWS = [4, 5, 6, 7, 8]      # Becky, Elida, Fionn, Jade, Kate
-WIDER_TEAM_DATA_ROWS = list(range(10, 24))     # Charne..Tara (14 agents, rows 10-23, incl. Lucy, Harry, Roseanne)
+# Data tab rows: Core Phones start at row 4 (1-indexed), Wider Team at row 9
+# (row 8 is the "WIDER TEAM" section header)
+CORE_PHONES_DATA_ROWS = [4, 5, 6, 7]      # Becky, Elida, Fionn, Kate
+WIDER_TEAM_DATA_ROWS = list(range(9, 22))     # Charne..Tara (13 agents, rows 9-21, incl. Lucy, Harry, Roseanne)
 
 # TL View rows
 # Row 1: title, Row 2: week date, Row 3: headers (frozen)
 # Row 4: "Core Phones" section header
-# Rows 5-9: Core Phones agents
-# Row 10: "Wider Team" section header
-# Rows 11-24: Wider Team agents (14 agents incl. Lucy, Harry, Roseanne)
-CORE_TL_ROWS = list(range(5, 10))     # 5..9
-WIDER_TL_ROWS = list(range(11, 25))   # 11..24
+# Rows 5-8: Core Phones agents
+# Row 9: "Wider Team" section header
+# Rows 10-22: Wider Team agents (13 agents incl. Lucy, Harry, Roseanne)
+CORE_TL_ROWS = list(range(5, 9))      # 5..8
+WIDER_TL_ROWS = list(range(10, 23))   # 10..22
 
 # Day config: (role_col, baselineMet_col, stretchMet_col) in Data tab (0-indexed)
 # Fri D-I (3-8), Mon J-O (9-14), Tue P-U (15-20), Wed V-AA (21-26), Thu AB-AG (27-32)
@@ -44,7 +44,7 @@ SKIPS_DATA_COL = 39  # Column AN (0-indexed = 39) — weekly skips in Data tab
 TL_CALC_TEAMS = {
     'Courtney Elijah': [
         ('Fionn Burrows', 40), ('Kate O\'Neill', 40), ('Becky Smith', 40),
-        ('Jade Regent', 40), ('Elida Gizli', 40), ('Harriet Clifton-Sprigg', 40),
+        ('Elida Gizli', 40), ('Harriet Clifton-Sprigg', 40),
         ('Harry McNicholas', 40),
     ],
     'Yasmin Aly': [
@@ -54,7 +54,7 @@ TL_CALC_TEAMS = {
     ],
     'Jessica Jackson': [
         ('Cris Macagi', 40), ('Clare Brown', 32),
-        ('Erika Frolova', 40), ('Lucy Riordan', 40), ('Maisha Begum', 40),
+        ('Erika Frolova', 40), ('Lucy Riordan', 40),
     ],
 }
 

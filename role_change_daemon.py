@@ -223,14 +223,24 @@ def _auto_apply_for(d):
         import reward_time as rt
         friday = rt.get_reward_friday(d)
         wk = rt.load_week(friday)
-        if not wk:
-            return
-        changes = rt.apply_all_moves(wk, friday)
-        if changes:
-            rt.save_week(friday, wk)
-            logging.info(f"auto-applied moves: {len(changes)} day-shape change(s)")
+        if wk:
+            changes = rt.apply_all_moves(wk, friday)
+            if changes:
+                rt.save_week(friday, wk)
+                logging.info(f"auto-applied moves: {len(changes)} day-shape change(s)")
     except Exception as e:
         logging.warning(f"auto_apply_for {d} failed: {e}")
+
+    # Mirror the day's moves into the rota Daily Notes tab (independent of
+    # reward-week state — Daily Notes should reflect moves even out of a
+    # reward week). Best-effort: never break the capture flow.
+    try:
+        from generate_rota import get_gspread, sync_moves_to_daily_notes
+        res = sync_moves_to_daily_notes(get_gspread(), d)
+        if any(res[k] for k in ('added', 'updated', 'deleted')):
+            logging.info(f"daily-notes sync {d}: {res}")
+    except Exception as e:
+        logging.warning(f"daily-notes sync {d} failed: {e}")
 
 
 def _format_confirmation(applied: dict) -> str:

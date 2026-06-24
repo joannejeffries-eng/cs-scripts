@@ -26,28 +26,28 @@ FULL_TIME_HOURS = 40  # Weekly hours for full-time
 # ── Name mappings (first name -> DB full name) ──────────────────────────────
 DB_NAMES = {
     'Becky': 'Becky Smith', 'Elida': 'Elida Gizli', 'Fionn': 'Fionn Burrows',
-    'Jade': 'Jade Regent', 'Kate': "Kate O'Neill", 'Kirsty': 'Kirsty Rowley',
+    'Kate': "Kate O'Neill", 'Kirsty': 'Kirsty Rowley',
     'Clare': 'Clare Brown', 'Cris': 'Cris Macagi',
     'Erika': 'Erika Frolova', 'Harriet': 'Harriet Clifton-Sprigg',
     'Lizzie': 'Lizzie Williamson', 'Lucy': 'Lucy Riordan',
-    'Maisha': 'Maisha Begum', 'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
+    'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
     'Tara': 'Tara Dunkley',
     'Harry': 'Harry McNicholas', 'Roseanne': 'Roseanne Brooks-Brown',
 }
 FIRST_NAMES = {v: k for k, v in DB_NAMES.items()}
 
 TL_TEAMS = {
-    'Courtney': ['Fionn', 'Kate', 'Becky', 'Jade', 'Elida', 'Harriet', 'Harry'],
+    'Courtney': ['Fionn', 'Kate', 'Becky', 'Elida', 'Harriet', 'Harry'],
     'Yasmin': ['Tara', 'Sophie', 'Noemi', 'Lizzie', 'Kirsty', 'Roseanne'],
-    'Jess': ['Cris', 'Clare', 'Erika', 'Lucy', 'Maisha'],
+    'Jess': ['Cris', 'Clare', 'Erika', 'Lucy'],
 }
 ALL_AGENTS = sorted(DB_NAMES.keys())
 
 # ── Weekly hours per person (for pro-rata) ──────────────────────────────────
 WEEKLY_HOURS = {
-    'Becky': 40, 'Kate': 40, 'Fionn': 40, 'Jade': 40, 'Elida': 40,
+    'Becky': 40, 'Kate': 40, 'Fionn': 40, 'Elida': 40,
     'Harriet': 40, 'Cris': 40, 'Clare': 32, 'Erika': 40,
-    'Lucy': 40, 'Maisha': 40, 'Noemi': 40, 'Tara': 22,
+    'Lucy': 40, 'Noemi': 40, 'Tara': 22,
     'Sophie': 30, 'Kirsty': 40, 'Lizzie': 30,
     'Harry': 40, 'Roseanne': 40,
 }
@@ -98,13 +98,12 @@ def _connect_postgres(db_url):
     except psycopg2.OperationalError as e:
         if running_on_cloud():
             raise CloudDBUnreachableError(
-                "Can't reach the Looker database from Streamlit Cloud — "
-                "it's on Juno's private network and only Jo's laptop "
-                "(on VPN) can connect.\n\n"
-                "👉 Ask Jo to click **🔄 Pull actuals** on her local rota "
-                "app (http://localhost:8501 → Reward Time). The fresh "
-                "numbers and skip counts will appear here within a few "
-                "seconds — the apps share the same state via Drive."
+                "Can't reach the Looker database — it's on Juno's private "
+                "network and only Jo's laptop (on VPN) can connect.\n\n"
+                "👉 Reward-time actuals are pulled by the local daily cron "
+                "(com.juno.cs-daily-actuals) and written to the tracker sheet "
+                "+ Drive state. If figures look stale, run "
+                "`python3 daily_actuals_pull.py` on Jo's laptop (VPN on)."
             ) from e
         raise
 
@@ -129,8 +128,6 @@ STRETCH_BONUS_HOURS = 1.0
 # ── Reward day assignments ──────────────────────────────────────────────────
 # {name: (day_name, block)} — day_name is 'Tue','Wed','Thu'; block is 'AM' or 'PM'
 REWARD_DAYS = {
-    'Jade':     ('Tue', 'AM'),
-    'Maisha':   ('Tue', 'AM'),
     'Becky':    ('Tue', 'PM'),
     'Lucy':     ('Tue', 'PM'),
     'Sophie':   ('Tue', 'PM'),
@@ -150,7 +147,7 @@ REWARD_DAYS = {
 }
 # Harry starts 2026-06-01, Roseanne 2026-06-10 — blocks assigned now; they won't
 # appear in the weekly reward message until they have worked days (days_worked > 0).
-# Phones team: Jade, Becky, Kate, Fionn, Kirsty, Elida
+# Phones team: Becky, Kate, Fionn, Kirsty, Elida
 # Phones can only swap with phones
 
 DAY_NAME_TO_IDX = {'Mon': 0, 'Tue': 1, 'Wed': 2, 'Thu': 3, 'Fri': 4}
@@ -162,9 +159,9 @@ STANDARD_SHIFT_HOURS = 8.0  # Full day = 8 productive hours; targets are calibra
 
 # Per-person daily hours (mirrors generate_rota DEFAULT_HOURS)
 DAILY_HOURS = {
-    'Becky': 8, 'Kate': 8, 'Fionn': 8, 'Jade': 8, 'Elida': 8,
+    'Becky': 8, 'Kate': 8, 'Fionn': 8, 'Elida': 8,
     'Harriet': 8, 'Cris': 8, 'Clare': 8, 'Erika': 8, 'Lucy': 8,
-    'Maisha': 8, 'Noemi': 8, 'Kirsty': 8,
+    'Noemi': 8, 'Kirsty': 8,
     'Tara': 4.5, 'Sophie': 6, 'Lizzie': 6,
     'Harry': 8, 'Roseanne': 8,
 }
@@ -467,7 +464,7 @@ LUNCH_BAND = ('12:00', '14:00')
 # (weekday Mon=0…Fri=4, start 'HH:MM', end 'HH:MM').
 ONE_TO_ONE_SLOTS = {
     # Courtney's team — Wednesday
-    'Elida':   (2, '09:00', '10:00'), 'Jade': (2, '09:00', '10:00'),
+    'Elida':   (2, '09:00', '10:00'),
     'Harry':   (2, '09:00', '10:00'),
     'Harriet': (2, '10:30', '11:30'), 'Becky': (2, '10:30', '11:30'),
     'Fionn':   (2, '10:30', '11:30'), 'Kate':  (2, '10:30', '11:30'),
@@ -478,7 +475,7 @@ ONE_TO_ONE_SLOTS = {
     'Lizzie':  (3, '10:30', '11:30'),
     # Jess's team — Wednesday
     'Lucy':    (2, '09:00', '10:00'), 'Erika': (2, '09:00', '10:00'),
-    'Cris':    (2, '10:30', '11:30'), 'Maisha': (2, '10:30', '11:30'),
+    'Cris':    (2, '10:30', '11:30'),
     'Clare':   (2, '10:30', '11:30'),
 }
 
@@ -1310,8 +1307,18 @@ def _role_category(role):
     return s
 
 
-def sync_rota_into_week(week_data, friday, assignments_fri=None, assignments_mon_thu=None):
+def sync_rota_into_week(week_data, friday, assignments_fri=None, assignments_mon_thu=None,
+                        reset_segments=False):
     """Overlay the current rota onto an existing week without losing TL inputs.
+
+    reset_segments=True: do NOT preserve existing splits — reset every working
+    day to the rota's single role. Used by the headless daily sync, where
+    resync_from_daily_notes (reward-time/appointments) and apply_all_moves
+    (Slack moves) run straight after and rebuild the splits from scratch. This
+    avoids a stale base role being kept just because its role *category* still
+    matches (e.g. a leftover 'Triage and Video Calls' segment surviving a
+    change to 'Triage only', which have different targets).
+
 
     Updates each day's role / is_working / shift_hours / targets to match the
     rota. Preserves: dr.metrics (actuals), pw.quality_ok, pw.timeline_ok,
@@ -1390,7 +1397,7 @@ def sync_rota_into_week(week_data, friday, assignments_fri=None, assignments_mon
                 # all collapse to 'Triage').
                 new_cat = _role_category(new_role)
                 keep_splits = False
-                if dr.segments:
+                if not reset_segments and dr.segments:
                     for seg in dr.segments:
                         if _role_category(seg.role) == new_cat:
                             keep_splits = True
@@ -1609,6 +1616,81 @@ def autofill_appointment_splits_from_notes(week_data, notes_by_date):
     )
 
 
+_HALF_DAY_KEYWORDS = ('half day', 'half-day', 'al half')
+
+
+def autofill_half_day_from_notes(week_data, notes_by_date):
+    """Pro-rate shift hours for AL half-day entries in Daily Notes.
+
+    Unlike reward-time / appointment autofills (which split the working day
+    into segments), a half day reduces the working block itself: the rest of
+    the day was AL, so the person was off the button for those hours. We
+    use the Daily Notes time range as the working hours and call
+    adjust_shift_hours, which recomputes the pro-rated target.
+
+    Idempotent + bi-directional:
+      - notes match → shift_hours snapped to the time range
+      - notes no longer match → shift_hours restored to the person's normal
+        daily hours (so removing a stale half-day note also reverts)
+
+    Reverts on REMOVAL are only triggered when there's a recorded override
+    whose reason starts with 'Autofilled half-day' — TL-applied manual
+    shift adjustments are never touched.
+
+    Returns: [{'name', 'date', 'hours', 'status': 'applied'|'reverted'|'skipped', 'reason'}]
+    """
+    half_days = {}
+    for d, entries in notes_by_date.items():
+        for entry in entries:
+            note = (entry.get('note') or '').strip().lower()
+            if not any(k in note for k in _HALF_DAY_KEYWORDS):
+                continue
+            name = (entry.get('name') or '').strip()
+            hours = parse_time_range_hours(entry.get('time') or '')
+            if hours and hours > 0:
+                half_days[(name, d)] = hours
+
+    results = []
+    for name, pw in week_data.items():
+        full_day = DAILY_HOURS.get(name, STANDARD_SHIFT_HOURS)
+        for d, dr in pw.days.items():
+            if not dr.is_working:
+                continue
+            note_hours = half_days.get((name, d))
+            already_autofilled = any(
+                (ov.get('reason') or '').startswith('Autofilled half-day')
+                and ov.get('field', '').endswith(f"({d.strftime('%a %d/%m')})")
+                for ov in pw.overrides
+            )
+
+            if note_hours is not None:
+                if abs(dr.shift_hours - note_hours) < 0.1:
+                    continue   # already at target hours
+                if note_hours >= full_day - 0.1:
+                    results.append({'name': name, 'date': d, 'hours': note_hours,
+                                    'status': 'skipped',
+                                    'reason': f"{note_hours}h ≥ full day"})
+                    continue
+                old_hours = dr.shift_hours
+                adjust_shift_hours(pw, d, note_hours, actuals=dr.metrics)
+                add_override(pw, f'shift hours ({d.strftime("%a %d/%m")})',
+                              old_hours, note_hours,
+                              f"Autofilled half-day from Daily Notes: working block {note_hours}h")
+                results.append({'name': name, 'date': d, 'hours': note_hours,
+                                'status': 'applied',
+                                'reason': f"shift {note_hours}h"})
+            elif already_autofilled and abs(dr.shift_hours - full_day) > 0.1:
+                old_hours = dr.shift_hours
+                adjust_shift_hours(pw, d, full_day, actuals=dr.metrics)
+                add_override(pw, f'shift hours ({d.strftime("%a %d/%m")})',
+                              old_hours, full_day,
+                              "Half-day note removed; restored full shift hours")
+                results.append({'name': name, 'date': d, 'hours': full_day,
+                                'status': 'reverted',
+                                'reason': f"shift {full_day}h"})
+    return results
+
+
 def resync_autofilled_splits_from_notes(week_data, notes_by_date):
     """Two-way sync: revert stale autofilled splits + apply current ones.
 
@@ -1734,6 +1816,61 @@ def resync_autofilled_splits_from_notes(week_data, notes_by_date):
         'reverted': reverted,
         'applied': reward_results + appt_results,
     }
+
+
+def sync_rota_from_sheet(week_data, friday):
+    """Overlay the current canonical rota (roles + absences) onto the reward
+    week, preserving actuals / quality_ok / timeline_ok / overrides.
+
+    Headless equivalent of the retired app's 'Sync rota' button — keeps the
+    reward week in step with mid-week rota edits (role swaps, absences, a
+    stale AL carried over from a prior week). The Fri→Thu reward week spans
+    two rota weeks: Friday comes from the week of `friday`'s Monday; Mon–Thu
+    from the following Monday. Reads via generate_rota.read_original_rota.
+
+    Runs with reset_segments=True, so call it BEFORE resync_from_daily_notes
+    + apply_all_moves — those rebuild the reward-time/appointment and move
+    splits on top of the clean rota base. Only touches people already in
+    week_data (leavers removed from the roster won't be re-added).
+    Returns the sync_rota_into_week change list.
+    """
+    import generate_rota as gr
+    from datetime import timedelta
+    gc = gr.get_gspread()
+    fri_monday = friday - timedelta(days=friday.weekday())   # Mon of Friday's week
+    mon_thu_monday = friday + timedelta(days=3)              # Mon of the Mon–Thu portion
+    assignments_fri, _ = gr.read_original_rota(gc, fri_monday)
+    assignments_mon_thu, _ = gr.read_original_rota(gc, mon_thu_monday)
+    return sync_rota_into_week(week_data, friday, assignments_fri, assignments_mon_thu,
+                               reset_segments=True)
+
+
+def resync_from_daily_notes(week_data, friday):
+    """Read the reward week's Daily Notes and fold any half-day / reward-time
+    / appointment markers into week_data (idempotent two-way sync).
+
+    Headless equivalent of the retired app's 'Resync from notes' button —
+    builds notes_by_date across the (up to two) calendar weeks the Fri→Thu
+    reward week spans, then applies half-day shift adjustments (which must
+    run BEFORE reward-time/appointment splits, so those splits sit inside
+    the correctly-sized working block) followed by reward-time + appointment
+    autofills. Run this BEFORE apply_all_moves so moves compose around the
+    protected segments. Returns the resync result.
+    """
+    import generate_rota as gr
+    from datetime import timedelta
+    gc = gr.get_gspread()
+    notes_by_date = {}
+    seen = {}
+    for d in get_weekday_dates(friday):
+        mon = d - timedelta(days=d.weekday())
+        if mon not in seen:
+            seen[mon] = gr.read_daily_notes(gc, mon)
+        notes_by_date[d] = seen[mon].get(d.weekday(), [])
+    half_day_result = autofill_half_day_from_notes(week_data, notes_by_date)
+    split_result = resync_autofilled_splits_from_notes(week_data, notes_by_date)
+    split_result['half_day'] = half_day_result
+    return split_result
 
 
 def _role_needs_cover(role: str) -> bool:
@@ -2093,26 +2230,52 @@ def apply_moves_to_day(pw, target_date, moves, *, noise_floor_min=30):
 
     old_label = dr.role
 
-    # Gather this person's qualifying moves.
-    person_moves = []
+    # Gather this person's qualifying moves. Open-ended moves (no end time)
+    # run until the next move's start, or to the end of their shift — the same
+    # way the live rota interprets them. Without this they'd be dropped, so a
+    # 'Clare to chasing 09:20' with no close time never reached the tracker.
+    import generate_rota as _gr
+    _shift_win = _gr.DEFAULT_SHIFTS.get(pw.name)
+    shift_end_min = int(_shift_win[1] * 60) if _shift_win else None
+
+    raw = []
     for m in moves:
         if m.get('name') != pw.name:
             continue
         if m.get('action') not in (None, 'move'):
             continue
         start = m.get('start_time') or ''
-        end = m.get('end_time') or ''
-        if ':' not in start or ':' not in end:
+        if ':' not in start:
             continue
         try:
             sh, sm = (int(p) for p in start.split(':'))
-            eh, em = (int(p) for p in end.split(':'))
         except ValueError:
             continue
-        dur_min = (eh * 60 + em) - (sh * 60 + sm)
+        end = m.get('end_time') or ''
+        end_min = None
+        if ':' in end:
+            try:
+                eh, em = (int(p) for p in end.split(':'))
+                end_min = eh * 60 + em
+            except ValueError:
+                end_min = None
+        raw.append({'start_min': sh * 60 + sm, 'end_min': end_min,
+                    'to_role': m.get('to_role')})
+
+    raw.sort(key=lambda x: x['start_min'])
+    person_moves = []
+    for i, mv in enumerate(raw):
+        end_min = mv['end_min']
+        if end_min is None:   # open-ended → next move's start, else shift end
+            nxt = next((r['start_min'] for r in raw[i + 1:]
+                        if r['start_min'] > mv['start_min']), None)
+            end_min = nxt if nxt is not None else shift_end_min
+        if end_min is None:
+            continue   # open move + unknown shift end — can't size it
+        dur_min = end_min - mv['start_min']
         if dur_min < noise_floor_min:
             continue
-        person_moves.append({'to_role': m.get('to_role'), 'duration_min': dur_min})
+        person_moves.append({'to_role': mv['to_role'], 'duration_min': dur_min})
 
     # No qualifying moves now.
     if not person_moves:

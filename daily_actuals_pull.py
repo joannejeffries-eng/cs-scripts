@@ -101,12 +101,41 @@ def main():
     try:
         friday = result['friday']
         week_data = rt.load_week(friday)
+        # Rebuild each day in layers, rota first:
+        #   1. sync_rota_from_sheet — roles/absences from the canonical rota
+        #      (headless 'Sync rota'; resets splits so a stale base can't survive)
+        #   2. resync_from_daily_notes — reward-time / appointment slots
+        #   3. apply_all_moves — captured Slack role moves
+        # Each layer composes on the previous one.
+        try:
+            rt.sync_rota_from_sheet(week_data, friday)
+        except Exception:
+            logging.exception("sync_rota_from_sheet failed (continuing)")
+        try:
+            rt.resync_from_daily_notes(week_data, friday)
+        except Exception:
+            logging.exception("resync_from_daily_notes failed (continuing)")
         move_changes = rt.apply_all_moves(week_data, friday)
-        if move_changes:
-            rt.save_week(friday, week_data)
-            logging.info(f"applied {len(move_changes)} move-derived day shape(s)")
+        rt.save_week(friday, week_data)
+        logging.info(f"synced rota + notes + applied {len(move_changes)} move-derived day shape(s)")
     except Exception as e:
-        logging.exception("apply_all_moves failed (continuing)")
+        logging.exception("rota/notes/moves sync failed (continuing)")
+
+    # ── 2b. Mirror captured moves into the rota Daily Notes ───────────
+    # Catch-up for any moves the role-change daemon missed (e.g. the laptop
+    # was asleep when the move was posted). Idempotent — unchanged days
+    # write nothing. Covers every reward-week weekday up to today.
+    try:
+        import generate_rota as gr
+        today = date.today()
+        gc = gr.get_gspread()
+        for d in rt.get_weekday_dates(friday):
+            if d <= today:
+                res = gr.sync_moves_to_daily_notes(gc, d)
+                if any(res[k] for k in ('added', 'updated', 'deleted')):
+                    logging.info(f"daily-notes sync {d}: {res}")
+    except Exception:
+        logging.exception("daily-notes sync failed (continuing)")
 
     # ── 3. Write the human-readable sheet snapshot ────────────────────
     snapshot_ok = False

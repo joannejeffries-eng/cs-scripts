@@ -47,7 +47,6 @@ TEAMS: dict[str, dict] = {
         "user_id": "U07Q2EEN3SL",
         "members": [
             "Cris J",
-            "Maisha J",
             "Erika",
             "Clare Brown",
             "Lucy Riordan",
@@ -62,7 +61,6 @@ TEAMS: dict[str, dict] = {
         "members": [
             "Harriet",
             "Kate O'Neill",
-            "Jade",
             "Becky",
             "Fionn",
             "Elida",

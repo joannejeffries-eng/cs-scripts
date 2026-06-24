@@ -58,19 +58,19 @@ SEC_EMAIL = 'Email Health'
 # ── Team data (from TL_CALC_TEAMS in setup_tl_view.py) ─────────────────────
 DB_NAMES = {
     'Becky': 'Becky Smith', 'Elida': 'Elida Gizli', 'Fionn': 'Fionn Burrows',
-    'Jade': 'Jade Regent', 'Kate': "Kate O'Neill", 'Kirsty': 'Kirsty Rowley',
+    'Kate': "Kate O'Neill", 'Kirsty': 'Kirsty Rowley',
     'Clare': 'Clare Brown', 'Cris': 'Cris Macagi',
     'Erika': 'Erika Frolova', 'Harriet': 'Harriet Clifton-Sprigg',
     'Lizzie': 'Lizzie Williamson', 'Lucy': 'Lucy Riordan',
-    'Maisha': 'Maisha Begum', 'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
+    'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
     'Tara': 'Tara Dunkley',
     'Harry': 'Harry McNicholas', 'Roseanne': 'Roseanne Brooks-Brown',
 }
 
 TL_TEAMS = {
-    'Courtney': ['Fionn', 'Kate', 'Becky', 'Jade', 'Elida', 'Harriet', 'Harry'],
+    'Courtney': ['Fionn', 'Kate', 'Becky', 'Elida', 'Harriet', 'Harry'],
     'Yasmin': ['Tara', 'Sophie', 'Noemi', 'Lizzie', 'Kirsty', 'Roseanne'],
-    'Jess': ['Cris', 'Clare', 'Erika', 'Lucy', 'Maisha'],
+    'Jess': ['Cris', 'Clare', 'Erika', 'Lucy'],
 }
 
 ALL_TLS = ['Yasmin', 'Courtney', 'Jess']
@@ -149,14 +149,11 @@ DEFAULT_ROLE_TARGETS = [
 DEFAULT_SKILLS = {
     'Becky':   {'Inbound', 'Uncat', 'Call&Chase', 'LMS/LE', 'Email Health'},
     'Fionn':   {'Inbound', 'Uncat', 'Verify Addr'},
-    'Jade':    {'Inbound', 'LMS/LE', 'Email Health'},
     'Kate':    {'Inbound', 'Uncat', 'Webchat', 'E-sign', 'LMS/LE'},
     'Elida':   {'Inbound', 'Uncat', 'Missed Calls'},
     'Harriet': {'Inbound', 'Webchat', 'LMS/LE', 'Missed Calls'},
     'Cris':    {'Triage', 'Uncat', 'Lender Chase', 'Verify Addr', 'Call&Chase',
                 'E-sign', 'LMS/LE', 'Video', 'ID Checks', 'ICS'},
-    'Maisha':  {'Triage', 'Inbound', 'Lender Chase', 'Verify Addr', 'Call&Chase',
-                'E-sign', 'ID Checks', 'ICS'},
     'Erika':   {'Triage', 'Inbound', 'Uncat', 'Webchat', 'Verify Addr', 'Call&Chase',
                 'E-sign', 'LMS/LE', 'ID Checks'},
     'Clare':   {'Triage', 'Webchat', 'Lender Chase', 'Verify Addr',
@@ -179,14 +176,12 @@ DEFAULT_HOURS = {
     'Becky':   {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Kate':    {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Fionn':   {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
-    'Jade':    {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Elida':   {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Harriet': {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Cris':    {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Clare':   {0: 0, 1: 8, 2: 8, 3: 8, 4: 8},
     'Erika':   {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Lucy':    {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
-    'Maisha':  {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Noemi':   {0: 8, 1: 8, 2: 8, 3: 8, 4: 8},
     'Tara':    {0: 4.5, 1: 4.5, 2: 4.5, 3: 4.5, 4: 4},
     'Sophie':  {0: 6, 1: 6, 2: 6, 3: 6, 4: 6},
@@ -204,14 +199,12 @@ DEFAULT_SHIFTS = {
     'Becky':   (9, 17.5),    # 9-5:30 (or 8:30-5, varies)
     'Kate':    (9, 17.5),    # 9-5:30
     'Fionn':   (8, 17),      # 8-5
-    'Jade':    (9, 18),      # 9-6
     'Elida':   (8, 17),      # 8-5
     'Harriet': (8, 17),      # 8-5
     'Cris':    (8, 17),      # 8-5
     'Clare':   (8, 17),      # 8-5 (off Mon)
     'Erika':   (8, 17),      # 8-5
     'Lucy':    (9, 18),      # 9-6 (assumed standard new starter)
-    'Maisha':  (9, 18),      # 9-6
     'Noemi':   (9, 18),      # 9-6
     'Tara':    (9, 13.5),    # ~4.5h (approx 9-1:30)
     'Sophie':  (7, 15),      # 7-8 + 9:30-3 (split — gap 8-9:30)
@@ -234,7 +227,6 @@ DEFAULT_ASSIGNMENTS = {
     'Kate':    (ROLE_PHONES, True, SEC_WEBCHAT),
     'Fionn':   (ROLE_PHONES, True, SEC_UNCAT),
     'Elida':   (ROLE_PHONES, True, SEC_MISSED),
-    'Jade':    (ROLE_PHONES, True, SEC_EMAIL),
     'Noemi':   (ROLE_TRIAGE, True, ''),
     'Kirsty':  (ROLE_TRIAGE, True, ''),
     'Lizzie':  (ROLE_TRIAGE, True, ''),
@@ -448,6 +440,132 @@ def append_daily_notes_rows(gc, rows):
         ])
     ws.append_rows(values, value_input_option='USER_ENTERED')
     return len(values)
+
+
+# Sentinel prefix marking a Daily Notes row the role-change daemon authored.
+# Only rows whose Note starts with this are ever managed/removed by the sync —
+# TL- and Jo-authored rows are never touched.
+MOVE_NOTE_SENTINEL = '↪︎ move:'
+
+
+def _move_time_str(m: dict) -> str:
+    """'09:20'–'11:00', or '09:20–end' when the move has no close time yet."""
+    s = (m.get('start_time') or '').strip()
+    e = (m.get('end_time') or '').strip()
+    if s and e:
+        return f"{s}–{e}"
+    if s:
+        return f"{s}–end"
+    return ''
+
+
+def _move_cover_needed(role: str) -> bool:
+    """Same Cover Needed? rule the rota uses (phones / T+LC / T+VC)."""
+    return (role.startswith('Inbound phones')
+            or role == 'Triage + lender chasing'
+            or role == 'Triage and Video Calls')
+
+
+def _dn_time_start(time_str: str) -> str:
+    """Leading HH:MM of a Daily Notes Time cell, e.g. '09:20–11:00' → '09:20'."""
+    import re
+    m = re.match(r'\s*(\d{1,2}:\d{2})', time_str or '')
+    return m.group(1) if m else ''
+
+
+def sync_moves_to_daily_notes(gc, d, moves=None):
+    """Reconcile daemon-authored Daily Notes rows for date `d` against the
+    captured Slack role moves.
+
+    One sentinel-tagged row per 'move' record, matched by (name, start_time):
+      - role/time/cover changed  → update in place
+      - new move                 → append a row
+      - move closed / cleared     → delete the row
+    TL- or Jo-authored rows (no sentinel in the Note column) are never touched.
+    Idempotent — a no-change call writes nothing.
+
+    Returns {'added', 'updated', 'deleted', 'unchanged'}.
+    """
+    import role_changes as rc
+    from gspread.cell import Cell
+    if moves is None:
+        moves = rc.load_moves(d)
+    # Desired daemon rows = every open/closed 'move' for the day.
+    want = {(m['name'], m['start_time']): m
+            for m in moves
+            if m.get('action') == 'move' and m.get('name') and m.get('start_time')}
+
+    ss = open_sheet(gc, EXISTING_ROTA_ID)
+    ws = ss.worksheet("Daily Notes")
+    rows = ws.get_all_values()
+
+    # Existing daemon rows for this date → {(name, start): (row_1based, row)}
+    existing = {}
+    for i, row in enumerate(rows):
+        if i < 4 or len(row) < 5:
+            continue
+        note = (row[4] or '').strip()
+        if not note.startswith(MOVE_NOTE_SENTINEL):
+            continue
+        if _parse_uk_date((row[0] or '').strip()) != d:
+            continue
+        key = ((row[2] or '').strip(), _dn_time_start(row[1] if len(row) > 1 else ''))
+        existing[key] = (i + 1, row)
+
+    def _row_fields(m):
+        role = m.get('to_role', '')
+        return (_move_time_str(m), role,
+                f"{MOVE_NOTE_SENTINEL} from {m.get('from_role') or '—'}",
+                'Yes' if _move_cover_needed(role) else 'No')
+
+    cells, appends, delete_rows = [], [], []
+    added = updated = deleted = unchanged = 0
+
+    for key, (rownum, row) in existing.items():
+        if key in want:
+            new_time, new_role, new_note, new_cover = _row_fields(want[key])
+            cur = ((row[1] or '').strip() if len(row) > 1 else '',
+                   (row[3] or '').strip() if len(row) > 3 else '',
+                   (row[4] or '').strip() if len(row) > 4 else '',
+                   (row[5] or '').strip() if len(row) > 5 else '')
+            if cur == (new_time, new_role, new_note, new_cover):
+                unchanged += 1
+            else:
+                cells.append(Cell(rownum, 2, new_time))   # B Time
+                cells.append(Cell(rownum, 4, new_role))   # D Role
+                cells.append(Cell(rownum, 5, new_note))   # E Note
+                cells.append(Cell(rownum, 6, new_cover))  # F Cover Needed?
+                updated += 1
+        else:
+            delete_rows.append(rownum)   # move closed/cleared → drop the row
+            deleted += 1
+
+    for key, m in want.items():
+        if key in existing:
+            continue
+        role = m.get('to_role', '')
+        appends.append({
+            'date': d, 'time': _move_time_str(m), 'name': m['name'], 'role': role,
+            'note': f"{MOVE_NOTE_SENTINEL} from {m.get('from_role') or '—'}",
+            'cover_needed': _move_cover_needed(role), 'whos_covering': '',
+        })
+        added += 1
+
+    # Order: in-place updates (no shift) → deletes bottom-up → appends at end.
+    if cells:
+        ws.update_cells(cells, value_input_option='USER_ENTERED')
+    if delete_rows:
+        ss.batch_update({'requests': [
+            {'deleteDimension': {'range': {
+                'sheetId': ws.id, 'dimension': 'ROWS',
+                'startIndex': r - 1, 'endIndex': r}}}
+            for r in sorted(delete_rows, reverse=True)
+        ]})
+    if appends:
+        append_daily_notes_rows(gc, appends)
+
+    return {'added': added, 'updated': updated,
+            'deleted': deleted, 'unchanged': unchanged}
 
 
 def get_gspread():
@@ -1033,6 +1151,8 @@ def generate_week(monday, people, role_targets=None, tl_rotation=None,
 
     # ── Pre-fill: absences, NWD, training ──
     for name, abs_days in known_absences.items():
+        if name not in assignments:
+            continue  # original rota may list people not in the test roster (e.g. hidden leavers)
         for di, role_str in abs_days.items():
             if di in working_days:
                 assignments[name][di] = role_str
@@ -1705,7 +1825,14 @@ def write_lunch_rota(gc, sheet_id, lunch_rota, monday):
 
 
 def write_daily_notes(gc, sheet_id, monday):
-    """Write empty Daily Notes tab in fill_tracker.py-compatible format."""
+    """Write the Daily Notes tab, mirroring the live rota's notes for the week.
+
+    Copies the original rota's Daily Notes context (absences, appointments,
+    reward time, cover) so the test rota carries the same givens for a fair
+    side-by-side. Daemon-authored move rows (note starts with the move
+    sentinel) are skipped — the test rota has its own role allocation, so the
+    original's mid-week moves don't belong on it. Falls back to blank date
+    rows for any day the original has no notes."""
     ss = open_sheet(gc, sheet_id)
     try:
         ws = ss.worksheet("Daily Notes")
@@ -1713,21 +1840,35 @@ def write_daily_notes(gc, sheet_id, monday):
         ws = ss.add_worksheet("Daily Notes", rows=50, cols=8)
 
     data = [
-        ['DAILY NOTES — Edit this tab to record absences, appointments and cover during the week'],
+        ['DAILY NOTES — mirrored from the live rota for side-by-side comparison'],
         [f'Week commencing: {monday.strftime("%d/%m/%Y")}'],
-        ['Add a row for each absence or appointment. "Cover Needed?" triggers only for Inbound phones or lender chasing roles. This tab feeds into the reward tracker for pro-rata calculations.'],
+        ['Absences, appointments and reward time copied from the live rota. "Cover Needed?" triggers only for Inbound phones or lender chasing roles. Feeds the reward tracker for pro-rata.'],
         ['Date', 'Time', 'Name', 'Scheduled role for the day', 'Note',
          'Cover Needed?', "Who's covering?"],
     ]
-    # Pre-fill date rows for each day
+    try:
+        orig = read_daily_notes(gc, monday)  # original rota (EXISTING_ROTA_ID)
+    except Exception:
+        orig = {}
+    copied = 0
     for day_idx in range(5):
         day_date = monday + timedelta(days=day_idx)
         date_str = f"{day_date.day}/{day_date.month}/{str(day_date.year)[-2:]}"
-        data.append([date_str, '', '', '', '', '', ''])
+        rows = [e for e in orig.get(day_idx, [])
+                if not (e.get('note') or '').strip().startswith(MOVE_NOTE_SENTINEL)]
+        if rows:
+            for e in rows:
+                data.append([date_str, e.get('time', ''), e.get('name', ''),
+                             e.get('role', ''), e.get('note', ''),
+                             'Yes' if e.get('cover_needed') else 'No',
+                             e.get('whos_covering', '')])
+                copied += 1
+        else:
+            data.append([date_str, '', '', '', '', '', ''])
 
     ws.clear()
     ws.update(range_name='A1', values=data)
-    print(f"  Wrote Daily Notes (empty template)")
+    print(f"  Wrote Daily Notes (mirrored {copied} note row(s) from the live rota)")
 
 
 def write_overrides(gc, sheet_id):

@@ -1,7 +1,16 @@
 """
-CS Rota Manager — Streamlit web app.
+CS Rota Manager — Streamlit web app.  ⚠️ RETIRED (2026-06-12)
 
-Run:  streamlit run rota_app.py
+This app is NO LONGER SERVED. Reward time is now spreadsheet-only: the weekly
+Reward Time Tracker sheet is the interface, the local crons/daemon run headless
+behind it. The launchd agent (com.juno.cs-rota-app) has been removed and
+setup_refresh_daemon.sh no longer installs it.
+
+The file is kept (not deleted) only because `populate_reward_sheet._gspread()`
+still imports `_cached_gspread` from here. Don't rely on the UI. A follow-up can
+move `_cached_gspread` into a small shared module and delete the rest.
+
+Run (legacy, not used):  streamlit run rota_app.py
 """
 import sys
 import streamlit as st
@@ -164,9 +173,9 @@ def _cached_working_hours():
         return {}
 
 
-CORE_PHONES = ['Becky', 'Elida', 'Fionn', 'Jade', 'Kate']
+CORE_PHONES = ['Becky', 'Elida', 'Fionn', 'Kate']
 WIDER_TEAM = ['Clare', 'Cris', 'Erika', 'Harriet', 'Harry',
-              'Kirsty', 'Lizzie', 'Lucy', 'Maisha', 'Noemi', 'Roseanne',
+              'Kirsty', 'Lizzie', 'Lucy', 'Noemi', 'Roseanne',
               'Sophie', 'Tara']
 
 
@@ -337,9 +346,9 @@ FULL_NAMES = {
     'Cris': 'Cris Macagi', 'Elida': 'Elida Gizli', 'Erika': 'Erika Frolova',
     'Fionn': 'Fionn Burrows', 'Harriet': 'Harriet Clifton-Sprigg',
     'Harry': 'Harry McNicholas', 'Roseanne': 'Roseanne Brooks-Brown',
-    'Jade': 'Jade Regent', 'Kate': "Kate O'Neill", 'Kirsty': 'Kirsty Rowley',
+    'Kate': "Kate O'Neill", 'Kirsty': 'Kirsty Rowley',
     'Lizzie': 'Lizzie Williamson', 'Lucy': 'Lucy Riordan',
-    'Maisha': 'Maisha Begum', 'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
+    'Noemi': 'Noemi Sip', 'Sophie': 'Sophie Maloney',
     'Tara': 'Tara Dunkley',
     'Jess': 'Jess Jackson', 'Yasmin': 'Yasmin Aly', 'Courtney': 'Courtney Elijah',
     'Jo': 'Joanne Jeffries',
@@ -450,12 +459,10 @@ PEGASUS_CHANNELS = {
     'Fionn':    'C06L8394GAZ',   # #pegasus-fionn-c
     'Harriet':  'C09JG8XGVHA',   # #pegasus-harriet-l
     'Harry':    'C0B78KZUG1E',   # #pegasus-harry-c
-    'Jade':     'C0AGJPAJWQ1',   # #pegasus-jade-c
     'Kate':     'C05FN07KF8B',   # #pegasus-kate-c
     'Kirsty':   'C0AMJTHL4SZ',   # #pegasus-kirsty-y
     'Lizzie':   'C072AQCBG15',   # #pegasus-lizzie-l
     'Lucy':     'C0AU24PSF39',   # #pegasus-lucy-j
-    'Maisha':   'C09GN3P0JA0',   # #pegasus-maisha-j
     'Noemi':    'C09AJD6T7H7',   # #pegasus-noemi-y
     'Roseanne': 'C0B6G6NJ6DP',   # #pegasus-roseanne-y
     'Sophie':   'C095Y5UAFV4',   # #pegasus-sophie-y
@@ -473,9 +480,9 @@ PEGASUS_LABELS = {
     'Elida': '#pegasus-elida-c',  'Erika': '#pegasus-erika-l',
     'Fionn': '#pegasus-fionn-c',  'Harriet': '#pegasus-harriet-l',
     'Harry': '#pegasus-harry-c',
-    'Jade': '#pegasus-jade-c',    'Kate': '#pegasus-kate-c',
+    'Kate': '#pegasus-kate-c',
     'Kirsty': '#pegasus-kirsty-y','Lizzie': '#pegasus-lizzie-l',
-    'Lucy': '#pegasus-lucy-j',    'Maisha': '#pegasus-maisha-j',
+    'Lucy': '#pegasus-lucy-j',
     'Noemi': '#pegasus-noemi-y',  'Roseanne': '#pegasus-roseanne-y',
     'Sophie': '#pegasus-sophie-y',
     'Tara': '#pegasus-tara-y',
