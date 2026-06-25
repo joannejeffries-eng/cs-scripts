@@ -1516,6 +1516,35 @@ def parse_time_range_hours(s: str):
     return duration if duration > 0 else None
 
 
+def _norm_name(name):
+    """Normalise a person name for case- and whitespace-insensitive matching.
+
+    Daily Notes are hand-typed, so a name can arrive mis-cased ('kate') or with
+    stray/internal whitespace ('  Sophie ', 'Mary  Jane'). Collapse it to a
+    canonical form so it still matches the week_data key.
+    """
+    return ' '.join((name or '').split()).lower()
+
+
+def _resolve_week_person(week_data, name):
+    """Resolve a (possibly mis-cased / loosely-spaced) Daily Notes name to the
+    canonical (week_data key, PersonWeek).
+
+    Returns (name, None) if there's no match. Exact lookup is tried first so the
+    common case stays fast; only on a miss do we fall back to a normalised scan.
+    The returned key is the canonical display name, so callers should use it in
+    messages and overrides rather than the raw Daily Notes spelling.
+    """
+    pw = week_data.get(name)
+    if pw is not None:
+        return name, pw
+    target = _norm_name(name)
+    for key, candidate in week_data.items():
+        if _norm_name(key) == target:
+            return key, candidate
+    return name, None
+
+
 def autofill_splits_from_notes(week_data, notes_by_date, *,
                                  note_keywords, segment_role,
                                  segment_label=None):
@@ -1554,7 +1583,7 @@ def autofill_splits_from_notes(week_data, notes_by_date, *,
                                 'status': 'skipped',
                                 'reason': f"couldn't parse time '{time_str}'"})
                 continue
-            pw = week_data.get(name)
+            name, pw = _resolve_week_person(week_data, name)
             if not pw:
                 results.append({'name': name, 'date': d, 'hours': hours,
                                 'status': 'skipped',
@@ -1648,7 +1677,7 @@ def autofill_half_day_from_notes(week_data, notes_by_date):
             name = (entry.get('name') or '').strip()
             hours = parse_time_range_hours(entry.get('time') or '')
             if hours and hours > 0:
-                half_days[(name, d)] = hours
+                half_days[(_norm_name(name), d)] = hours
 
     results = []
     for name, pw in week_data.items():
@@ -1656,7 +1685,7 @@ def autofill_half_day_from_notes(week_data, notes_by_date):
         for d, dr in pw.days.items():
             if not dr.is_working:
                 continue
-            note_hours = half_days.get((name, d))
+            note_hours = half_days.get((_norm_name(name), d))
             already_autofilled = any(
                 (ov.get('reason') or '').startswith('Autofilled half-day')
                 and ov.get('field', '').endswith(f"({d.strftime('%a %d/%m')})")
@@ -1734,7 +1763,7 @@ def resync_autofilled_splits_from_notes(week_data, notes_by_date):
         for e in entries:
             n = (e.get('name') or '').strip()
             note_text = (e.get('note') or '').strip().lower()
-            notes_index.setdefault((n, d), []).append(note_text)
+            notes_index.setdefault((_norm_name(n), d), []).append(note_text)
 
     fallback_year = (next(iter(notes_by_date.keys())).year
                      if notes_by_date else _date.today().year)
@@ -1774,7 +1803,7 @@ def resync_autofilled_splits_from_notes(week_data, notes_by_date):
 
             # Does Daily Notes still have a matching entry?
             # For appointment matching we accept either 'appointment' or 'appt'.
-            day_notes = notes_index.get((name, d), [])
+            day_notes = notes_index.get((_norm_name(name), d), [])
             if keyword == 'reward time':
                 still_present = any('reward time' in n for n in day_notes)
             else:
