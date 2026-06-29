@@ -303,6 +303,38 @@ def _met_with_rounded_archive(dr_or_seg, name: str = "") -> tuple[bool, bool]:
     return mb, ms
 
 
+def _day_effective_targets_and_met(dr, name: str) -> tuple[int, int, bool, bool]:
+    """Day-level (effective_base, effective_stretch, met_base, met_stretch).
+
+    For split-role days the override is resolved per *segment*, then summed —
+    the rota Overrides tab keys on a segment's own role (e.g. "Inbound phones",
+    which matches "Inbound phones + Webchat") whereas the combined day label
+    ("Phones / Reward") matches nothing, so resolving at day level silently
+    drops the override. This keeps the Data tab — and the formula-driven TL
+    View that reads it — in step with the Moves & Splits and Split Breakdown
+    tabs, which already resolve per segment.
+    """
+    if not dr.segments:
+        return _effective_targets_and_met(dr, name)
+    eff_base = eff_stretch = 0
+    base_ok = stretch_ok = True
+    any_target = False
+    for s in dr.segments:
+        if not s.target_base and not s.target_stretch:
+            continue  # no-target role (Reward time / Training / Appointment)
+        any_target = True
+        eb, es, mb, ms = _effective_targets_and_met(s, name)
+        eff_base += eb
+        eff_stretch += es
+        if not mb:
+            base_ok = False
+        if not ms:
+            stretch_ok = False
+    if not any_target:
+        return 0, 0, False, False
+    return eff_base, eff_stretch, bool(base_ok), bool(stretch_ok)
+
+
 # Map raw week_data absence labels to the canonical strings the TL View
 # formula recognises as "🌴 Off". Anything not in this map passes through.
 _ABSENCE_NORMALISATION = {
@@ -565,7 +597,7 @@ def build_data_rows(reward_friday: date) -> list[list]:
             else:
                 role = dr.role
             eff_base, eff_stretch, met_base_eff, met_stretch_eff = (
-                _effective_targets_and_met(dr, name)
+                _day_effective_targets_and_met(dr, name)
             )
             if met_base_eff and eff_base:
                 base_hits += 1
