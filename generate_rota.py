@@ -22,6 +22,12 @@ from dataclasses import dataclass, field
 CREDS_PATH = Path.home() / '.config/juno/claude-code/google-credentials.json'
 STATE_PATH = Path.home() / '.claude/scheduled-tasks/generate-rota/state.json'
 EXISTING_ROTA_ID = '1CMSEZSb-4D4mO6iPb8tVSaAPsZT5KZst9VSXH4bpi0Y'
+# Role cells on the live rota display emoji values (☎️ Phones, ✉️ Triage, …). The hidden
+# "Roles (canonical)" tab mirrors the Staff View person grid but translates each cell back
+# to the plain-text role names the reports expect (via the Map tab). Read ROLES from here so
+# scoring keeps working regardless of the emoji display — same layout as Staff View
+# (names row 5, dates col B, roles C7:Z400).
+CANON_ROLE_TAB = 'Roles (canonical)'
 SKILLS_MATRIX_ID = '14zUquhC8pnnNnLDDbIeFO6vkgfO6CjnGYBrIZCo8iDE'
 
 # Will be set after sheet creation / loaded from state
@@ -794,7 +800,7 @@ def read_original_rota(gc, monday):
         phone_agents = {day_idx: [names on phones]}
     """
     ss = open_sheet(gc, EXISTING_ROTA_ID)
-    ws = ss.worksheet("Staff View")
+    ws = ss.worksheet(CANON_ROLE_TAB)
     all_data = ws.get_all_values()
 
     header = all_data[4]
@@ -877,7 +883,7 @@ def read_absences_from_original(gc, monday):
     """Read annual leave / absences from the original rota for a given week.
     Returns {name: {day_idx: role_string}} for absence entries only."""
     ss = open_sheet(gc, EXISTING_ROTA_ID)
-    ws = ss.worksheet("Staff View")
+    ws = ss.worksheet(CANON_ROLE_TAB)
     all_data = ws.get_all_values()
 
     header = all_data[4]
