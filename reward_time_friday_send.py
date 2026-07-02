@@ -29,6 +29,7 @@ from pathlib import Path
 
 import requests
 
+import populate_reward_sheet as prs
 import reward_time as rt
 import timeline_checks as tlc
 from compat import get_postgres_url, get_slack_token
@@ -263,6 +264,26 @@ def run_friday_send(channel: str | None = None) -> None:
             "click *Save week summary* first, then re-authorise next week."
         )
         return
+
+    # Apply the TLs' manual Timeline/Quality sign-off from the tracker sheet —
+    # the sheet is the source of truth. A person is only quality/timeline
+    # confirmed once a TL has picked ✅ Pass (or ⏸️ N/A); Fail and blank both
+    # leave the gate closed. Anyone the TLs haven't signed off is flagged to Jo
+    # so a missing sign-off doesn't silently withhold someone's reward.
+    try:
+        signoff = prs.apply_tl_signoff_from_sheet(week_data, friday)
+        rt.save_week(friday, week_data)  # persist gates so state matches the post
+        if signoff["incomplete"]:
+            names = ", ".join(sorted(signoff["incomplete"]))
+            logger.warning(f"Incomplete TL sign-off: {names}")
+            _dm_jo(
+                ":warning: Posting reward time, but these people have *no "
+                f"Timeline/Quality sign-off* in the tracker yet: {names}. "
+                "They'll show as not-confirmed until a TL fills the sheet — "
+                "nudge the TLs, then I can re-post."
+            )
+    except Exception:
+        logger.exception("TL sign-off read-back failed; using saved gate values")
 
     try:
         rt.write_week_summary(friday, week_data)

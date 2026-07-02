@@ -74,8 +74,9 @@ def _summary_dm(friday, summary, sheet_link="") -> str:
         lines.append("\n*Timeline to review:*")
         for s in t_flagged:
             lines.append(f"• {s['name']} — {s['t_reason']}")
-    tail = ("\nSuggestions are pre-filled in the Reward Time tracker (TL View "
-            "Timeline/Quality columns) — review + override there before Friday.")
+    tail = ("\nThese are heads-up suggestions only — the Timeline/Quality "
+            "columns in the Reward Time tracker are left blank for the Team "
+            "Leads to complete manually before Friday.")
     if sheet_link:
         tail += f"\n{sheet_link}"
     lines.append(tail)
@@ -143,16 +144,17 @@ def main():
                f"```{type(e).__name__}: {e}\n\n{traceback.format_exc()[-500:]}```")
         return
 
-    # ── 3. Pre-fill the suggestions into the Reward Time tracker sheet ──
-    # (the sheet is the only reward-time interface now the app is retired).
+    # ── 3. Resolve the sheet link for the heads-up DM ──
+    # We deliberately do NOT pre-fill the TL View Timeline/Quality cells: the
+    # Team Leads complete those sign-offs manually. The suggestions computed
+    # above are still saved to state and surfaced in Jo's DM as a heads-up.
+    # find_or_copy_sheet also ensures the TLs have writer access.
     sheet_link = ""
     try:
         sheet_id = prs.find_or_copy_sheet(friday)
-        n = prs.prefill_quality_timeline_suggestions(sheet_id, friday)
         sheet_link = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
-        logging.info(f"Pre-filled {n} suggestion cell(s) into {sheet_id}")
     except Exception:
-        logging.exception("Sheet pre-fill failed (suggestions still saved to state)")
+        logging.exception("Could not resolve sheet link (suggestions still saved to state)")
 
     # ── 4. Heads-up DM ──
     _dm_jo(_summary_dm(friday, summary, sheet_link))

@@ -44,6 +44,16 @@ TEMPLATE_ID = "1BXYvxKcrG_jm3WaKBmqxYIb5p0SCWc6_AG4RvpTFEM0"
 ROTA_SHEET_ID = "1CMSEZSb-4D4mO6iPb8tVSaAPsZT5KZst9VSXH4bpi0Y"
 JO_USER_ID = "U07KFSSCUNT"
 
+# Team Leads who complete the Timeline/Quality sign-off + overrides in each
+# week's TL View. The CS Reward Time folder is shared read-only to the domain,
+# and a Drive copy inherits only the folder's permissions — so each new week's
+# sheet must be explicitly granted writer to the TLs or they can only view it.
+TL_EDITORS = [
+    "jess.jackson@evenlydistributed.xyz",
+    "yasmin.aly@evenlydistributed.xyz",
+    "courtney.elijah@evenlydistributed.xyz",
+]
+
 # Order Data + TL View rows so the 6 Core Phones land in the first 6
 # Core Phones section rows. Wider Team follows alphabetically.
 CORE_PHONES_ORDER = ["Harry", "Kate", "Becky", "Elida", "Fionn"]
@@ -99,13 +109,109 @@ def find_or_copy_sheet(reward_friday: date) -> str:
     if res["files"]:
         sid = res["files"][0]["id"]
         logger.info(f"Found existing sheet for {reward_friday}: {sid}")
+        grant_tl_edit_access(drive, sid)
         return sid
     copy = drive.files().copy(
         fileId=TEMPLATE_ID,
         body={"name": week_name, "parents": [FOLDER_ID]},
     ).execute()
     logger.info(f"Copied template → {copy['id']} ({week_name})")
+    grant_tl_edit_access(drive, copy["id"])
     return copy["id"]
+
+
+def grant_tl_edit_access(drive, spreadsheet_id: str) -> None:
+    """Ensure the three CS Team Leads have writer access to the week's sheet.
+
+    Idempotent: Drive silently no-ops a permission that already exists, so this
+    is safe to call on both the found and freshly-copied paths (it also heals
+    any older sheet that predates this sharing). Best-effort — a sharing
+    failure must not abort the populate run, so we log and continue.
+    """
+    for email in TL_EDITORS:
+        try:
+            drive.permissions().create(
+                fileId=spreadsheet_id,
+                body={"type": "user", "role": "writer", "emailAddress": email},
+                sendNotificationEmail=False,
+            ).execute()
+        except Exception:
+            logger.exception(f"Could not grant writer to {email}; continuing")
+
+
+# TL View dropdown values for the Timeline (N) / Quality (O) sign-off columns.
+def _parse_signoff(cell: str):
+    """Map a TL View Timeline/Quality dropdown value to a gate bool.
+
+    ✅ Pass / ⏸️ N/A → True (confirmed — reward not blocked on this dimension)
+    ❌ Fail          → False (TL failed it)
+    blank / unknown  → None (TL hasn't signed off yet)
+    """
+    v = (cell or "").strip()
+    if not v:
+        return None
+    if "Fail" in v:
+        return False
+    if "Pass" in v or "N/A" in v:
+        return True
+    return None
+
+
+def read_tl_signoff(spreadsheet_id: str) -> dict:
+    """Read the TLs' manual Timeline (N) / Quality (O) sign-off from the sheet.
+
+    Returns {name: {'timeline': bool|None, 'quality': bool|None}} where None
+    means the TL left that cell blank. Section-header rows (Core Phones / Wider
+    Team) resolve to no name and are skipped.
+    """
+    sheets = _sheets()
+    res = sheets.spreadsheets().values().batchGet(
+        spreadsheetId=spreadsheet_id,
+        ranges=["'TL View'!A4:A30", "'TL View'!N4:O30"],
+    ).execute()
+    names_block = res["valueRanges"][0].get("values", [])
+    no_block = res["valueRanges"][1].get("values", [])
+    out = {}
+    for i, name_row in enumerate(names_block):
+        name = name_row[0].strip() if name_row else ""
+        if not name:
+            continue
+        no = no_block[i] if i < len(no_block) else []
+        t_cell = no[0] if len(no) > 0 else ""
+        q_cell = no[1] if len(no) > 1 else ""
+        out[name] = {"timeline": _parse_signoff(t_cell),
+                     "quality": _parse_signoff(q_cell)}
+    return out
+
+
+def apply_tl_signoff_from_sheet(week_data, reward_friday: date) -> dict:
+    """Apply the TLs' manual sheet sign-off to the eligibility gates.
+
+    The sheet is the source of truth at send time: a person is only quality/
+    timeline confirmed once a TL has actively picked ✅ Pass (or ⏸️ N/A) in the
+    sheet. Fail and blank both leave the gate False, so calculate_eligibility
+    reports "Quality/Timeline not confirmed" until the TL signs off.
+
+    Mutates week_data in place. Returns {'sheet_id', 'incomplete'} where
+    `incomplete` is the list of worked people still missing a Timeline or
+    Quality selection — so the caller can flag it before the reward posts.
+    """
+    sheet_id = find_or_copy_sheet(reward_friday)
+    signoff = read_tl_signoff(sheet_id)
+    incomplete = []
+    for name, pw in week_data.items():
+        if pw.days_worked == 0:
+            continue
+        s = signoff.get(name)
+        if not s:
+            pw.timeline_ok = pw.quality_ok = False
+            incomplete.append(name)
+            continue
+        pw.timeline_ok = bool(s["timeline"])   # None/False → False
+        pw.quality_ok = bool(s["quality"])
+        if s["timeline"] is None or s["quality"] is None:
+            incomplete.append(name)
+    return {"sheet_id": sheet_id, "incomplete": incomplete}
 
 
 def _get_sheet_id(sheets, spreadsheet_id: str, tab_name: str) -> int | None:
@@ -771,59 +877,6 @@ def update_tl_view_week_label(spreadsheet_id: str, reward_friday: date) -> None:
     ).execute()
 
 
-def prefill_quality_timeline_suggestions(spreadsheet_id: str,
-                                         reward_friday: date) -> int:
-    """Pre-fill the TL View Timeline (N) + Quality (O) cells with the
-    auto-computed suggestions from saved week state, WITHOUT clobbering
-    anything a TL has already entered.
-
-    Suggestions come from `reward_time.run_quality_timeline_checks` (the
-    Thursday cron), stored on each PersonWeek as `timeline_suggested` /
-    `quality_suggested` (True / False / None). We only write into a cell that
-    is currently BLANK — once a TL (or this pre-fill) has put a value there,
-    it's left alone, so a TL's decision is never overwritten. Returns the
-    number of cells written.
-    """
-    week_data = rt.load_week(reward_friday)
-    if not week_data:
-        return 0
-    sheets = _sheets()
-    # Col A resolves =Data!B{r} to the actual names; read alongside the
-    # current Timeline/Quality cells so we can align by row and skip non-blank.
-    res = sheets.spreadsheets().values().batchGet(
-        spreadsheetId=spreadsheet_id,
-        ranges=["'TL View'!A4:A30", "'TL View'!N4:O30"],
-    ).execute()
-    names_block = res["valueRanges"][0].get("values", [])
-    no_block = res["valueRanges"][1].get("values", [])
-    SUG = {True: "✅ Pass", False: "❌ Fail"}
-    updates = []
-    for i, name_row in enumerate(names_block):
-        name = name_row[0].strip() if name_row else ""
-        if not name or name not in week_data:
-            continue  # section headers / strangers
-        pw = week_data[name]
-        if pw.days_worked == 0:
-            continue
-        no = no_block[i] if i < len(no_block) else []
-        n_cur = no[0].strip() if len(no) > 0 and no[0] else ""
-        o_cur = no[1].strip() if len(no) > 1 and no[1] else ""
-        row_num = 4 + i  # A4 is row 4
-        if not n_cur and pw.timeline_suggested in (True, False):
-            updates.append({"range": f"'TL View'!N{row_num}",
-                            "values": [[SUG[pw.timeline_suggested]]]})
-        if not o_cur and pw.quality_suggested in (True, False):
-            updates.append({"range": f"'TL View'!O{row_num}",
-                            "values": [[SUG[pw.quality_suggested]]]})
-    if updates:
-        sheets.spreadsheets().values().batchUpdate(
-            spreadsheetId=spreadsheet_id,
-            body={"valueInputOption": "USER_ENTERED", "data": updates},
-        ).execute()
-    logger.info(f"Pre-filled {len(updates)} quality/timeline suggestion cell(s).")
-    return len(updates)
-
-
 def run(reward_friday: date, dm: bool = False) -> str:
     # Pull fresh actuals for the current reward week before reading saved
     # state — keeps ad-hoc / mid-week runs in sync with whatever happened
@@ -861,14 +914,11 @@ def run(reward_friday: date, dm: bool = False) -> str:
     clear_and_write(sheet_id, "Split Breakdown",
                      build_split_breakdown_rows(reward_friday))
 
-    # Pre-fill the TL Timeline/Quality suggestion cells from saved state
-    # (set by the Thursday checks). No-clobber: only blank cells are filled,
-    # so a TL's own entry is never overwritten. Safe mid-week — suggestions
-    # are None until the Thursday checks run, so this is a no-op before then.
-    try:
-        prefill_quality_timeline_suggestions(sheet_id, reward_friday)
-    except Exception:
-        logger.exception("prefill_quality_timeline_suggestions failed; continuing")
+    # NB: we deliberately do NOT pre-fill the TL View Timeline/Quality cells.
+    # The Team Leads complete those sign-offs manually every week — the auto
+    # suggestions are still computed (see quality_timeline_checks.py) and sent
+    # to Jo as a heads-up DM, but they are never written into the sheet so the
+    # TLs make an active decision rather than rubber-stamping a pre-filled cell.
 
     autoresize_all_columns(sheet_id)
 
