@@ -59,8 +59,14 @@ ROLE_TARGETS = {
     'Triage only':              (130, 180, 'emails_archived'),
     'Triage + lender chasing':  (100, 140, 'emails_archived'),  # lower than triage-only — lender chasing takes time off the triage queue
     'Triage and Video Calls':   (100, 140, 'emails_archived'),  # same as +lender chasing — video calls take time off the triage queue too
+    'Triage + uncat':           (100, 140, 'emails_archived'),  # reduced triage — uncat sorting takes time off the queue
+    'Triage + email health':    (100, 140, 'emails_archived'),  # reduced triage — email health takes time off the queue
+    'Triage + inbound phones':  (100, 140, 'emails_archived'),  # reduced triage — phone cover takes time off the queue
     'Chasing':                  (95, 110, 'outbound_calls'),
     'Case setup only':          (275, 305, 'things_done'),
+    'Case setup + uncat':          (230, 260, 'things_done'),   # reduced ICS — secondary eats capacity (numbers provisional, confirm w/ Jo)
+    'Case setup + email health':   (230, 260, 'things_done'),   # reduced ICS (numbers provisional, confirm w/ Jo)
+    'Case setup + inbound phones': (230, 260, 'things_done'),   # reduced ICS — phone cover (numbers provisional, confirm w/ Jo)
     'Training':                 (0, 0, 'training_minutes'),    # split-role only; auto-meets base+stretch
     'Appointment':              (0, 0, 'appointment_minutes'),  # split-role only; auto-meets base+stretch
     'Reward time (prev week)':  (0, 0, 'reward_minutes'),       # split-role only; auto-meets base+stretch
