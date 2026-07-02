@@ -227,7 +227,9 @@ def read_rota(friday):
     creds = Credentials.from_authorized_user_file(str(CREDS_PATH))
     gc = gspread.authorize(creds)
     ss = gc.open_by_key(ROTA_SHEET_ID)
-    ws = ss.worksheet("Staff View")
+    # Roles display as emoji on Staff View; read the hidden "Roles (canonical)" mirror which
+    # translates them back to the plain-text role names this script matches on. Same layout.
+    ws = ss.worksheet("Roles (canonical)")
     all_data = ws.get_all_values()
 
     rota_agent_cols = build_rota_agent_cols(all_data[ROTA_HEADER_ROW])
