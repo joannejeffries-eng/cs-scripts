@@ -139,6 +139,81 @@ def grant_tl_edit_access(drive, spreadsheet_id: str) -> None:
             logger.exception(f"Could not grant writer to {email}; continuing")
 
 
+# TL View dropdown values for the Timeline (N) / Quality (O) sign-off columns.
+def _parse_signoff(cell: str):
+    """Map a TL View Timeline/Quality dropdown value to a gate bool.
+
+    ✅ Pass / ⏸️ N/A → True (confirmed — reward not blocked on this dimension)
+    ❌ Fail          → False (TL failed it)
+    blank / unknown  → None (TL hasn't signed off yet)
+    """
+    v = (cell or "").strip()
+    if not v:
+        return None
+    if "Fail" in v:
+        return False
+    if "Pass" in v or "N/A" in v:
+        return True
+    return None
+
+
+def read_tl_signoff(spreadsheet_id: str) -> dict:
+    """Read the TLs' manual Timeline (N) / Quality (O) sign-off from the sheet.
+
+    Returns {name: {'timeline': bool|None, 'quality': bool|None}} where None
+    means the TL left that cell blank. Section-header rows (Core Phones / Wider
+    Team) resolve to no name and are skipped.
+    """
+    sheets = _sheets()
+    res = sheets.spreadsheets().values().batchGet(
+        spreadsheetId=spreadsheet_id,
+        ranges=["'TL View'!A4:A30", "'TL View'!N4:O30"],
+    ).execute()
+    names_block = res["valueRanges"][0].get("values", [])
+    no_block = res["valueRanges"][1].get("values", [])
+    out = {}
+    for i, name_row in enumerate(names_block):
+        name = name_row[0].strip() if name_row else ""
+        if not name:
+            continue
+        no = no_block[i] if i < len(no_block) else []
+        t_cell = no[0] if len(no) > 0 else ""
+        q_cell = no[1] if len(no) > 1 else ""
+        out[name] = {"timeline": _parse_signoff(t_cell),
+                     "quality": _parse_signoff(q_cell)}
+    return out
+
+
+def apply_tl_signoff_from_sheet(week_data, reward_friday: date) -> dict:
+    """Apply the TLs' manual sheet sign-off to the eligibility gates.
+
+    The sheet is the source of truth at send time: a person is only quality/
+    timeline confirmed once a TL has actively picked ✅ Pass (or ⏸️ N/A) in the
+    sheet. Fail and blank both leave the gate False, so calculate_eligibility
+    reports "Quality/Timeline not confirmed" until the TL signs off.
+
+    Mutates week_data in place. Returns {'sheet_id', 'incomplete'} where
+    `incomplete` is the list of worked people still missing a Timeline or
+    Quality selection — so the caller can flag it before the reward posts.
+    """
+    sheet_id = find_or_copy_sheet(reward_friday)
+    signoff = read_tl_signoff(sheet_id)
+    incomplete = []
+    for name, pw in week_data.items():
+        if pw.days_worked == 0:
+            continue
+        s = signoff.get(name)
+        if not s:
+            pw.timeline_ok = pw.quality_ok = False
+            incomplete.append(name)
+            continue
+        pw.timeline_ok = bool(s["timeline"])   # None/False → False
+        pw.quality_ok = bool(s["quality"])
+        if s["timeline"] is None or s["quality"] is None:
+            incomplete.append(name)
+    return {"sheet_id": sheet_id, "incomplete": incomplete}
+
+
 def _get_sheet_id(sheets, spreadsheet_id: str, tab_name: str) -> int | None:
     ss = sheets.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
     for s in ss["sheets"]:
