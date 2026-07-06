@@ -5,21 +5,21 @@ Replaces the `/personal-jo:reward-time-friday-check` scheduled task.
 
 Flow each Friday:
   1. Jo (or whoever is covering) clicks **Authorise reward time** on the
-     Reward Time page sometime before 13:00. This writes an
-     auth_<friday>.json state file.
-  2. This script fires at 13:00 via launchd
-     (com.juno.cs-reward-friday-send.plist).
-  3. Authorisation present + both queues ≤ 50 → posts the team-grouped reward
-     message to #reward-time-questions-cs. The TLs' Timeline/Quality sign-off
-     is read from the tracker sheet (source of truth); anyone a TL hasn't
-     signed off yet holds the whole post until the sheet is complete.
-  4. Trigger not met (either queue > 50) → posts the not-triggered message
-     in the same channel.
-  5. Authorisation missing, or sign-off incomplete → DMs Jo and posts
-     nothing (one-shot; she has to re-authorise next week).
+     Reward Time page. This writes an auth_<friday>.json state file.
+  2. This script fires hourly 13:00–17:00 via launchd
+     (com.juno.cs-reward-friday-send.plist) and retries until it can post.
+  3. Authorisation present + both queues ≤ 50 + the tracker sheet fully signed
+     off → posts the team-grouped reward message to #reward-time-questions-cs
+     and writes a `posted_<friday>` marker so later hours are no-ops. The TLs'
+     Timeline/Quality sign-off is read from the tracker sheet (source of truth).
+  4. Not triggered yet (either queue > 50) → stays silent and retries next hour
+     (the reward-time-friday-check / hourly-poll tasks report queue status).
+  5. Authorisation missing, or sign-off incomplete → notifies once (Jo DM, or
+     in away mode the cover channel tagging the cover person) and keeps
+     retrying that day.
 
-After a send (either branch) the auth state is cleared so it can't fire
-again in the same week.
+Once posted, the auth state is cleared and the posted marker stops further
+sends that week. Authorisation is one-shot per week (does not carry forward).
 """
 from __future__ import annotations
 
@@ -127,6 +127,40 @@ def clear_authorisation(reward_friday: date) -> None:
     path = auth_state_path(reward_friday)
     if path.exists():
         path.unlink()
+
+
+# ── Per-week run state (idempotent hourly retries) ──────────────────────────
+# The send fires hourly 13:00–17:00 on Fridays so a late TL sign-off still gets
+# paid the same day. These markers make repeat runs safe: `posted` short-circuits
+# once the reward has gone out, and `_notify_once` stops a persistent hold/
+# failure from pinging every hour.
+
+
+def _flag_path(reward_friday: date, key: str) -> Path:
+    return STATE_DIR / f"{key}_{reward_friday.isoformat()}.json"
+
+
+def _already_posted(reward_friday: date) -> bool:
+    return _flag_path(reward_friday, "posted").exists()
+
+
+def _mark_posted(reward_friday: date) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    _flag_path(reward_friday, "posted").write_text(
+        datetime.now().isoformat(timespec="seconds")
+    )
+
+
+def _notify_once(reward_friday: date, key: str, text: str, problem: bool = True) -> None:
+    """Send a notice at most once per (friday, key) — avoids hourly-retry spam.
+    problem=True routes via _notify_problem (Jo DM / away-mode escalation);
+    problem=False via _notify_status (silent in away mode)."""
+    marker = _flag_path(reward_friday, f"notified-{key}")
+    if marker.exists():
+        return
+    (_notify_problem if problem else _notify_status)(text)
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    marker.write_text(datetime.now().isoformat(timespec="seconds"))
 
 
 # ── Slack ───────────────────────────────────────────────────────────────────
@@ -244,16 +278,22 @@ def run_friday_send(channel: str | None = None) -> None:
     friday = _reward_friday()
     logger.info(f"Reward Friday send check for reward week starting {friday}")
 
+    # 0. Idempotency — the send fires hourly 13:00–17:00; once the reward has
+    # posted (or the week was cleared), later runs are silent no-ops.
+    if _already_posted(friday):
+        logger.info("Reward already posted this week — nothing to do.")
+        return
+
     # 1. Authorisation
     auth = load_authorisation(friday)
     if auth is None:
         logger.info("No authorisation found — holding, no post.")
-        _notify_problem(
+        _notify_once(
+            friday, "noauth",
             f":pause_button: *Reward time not authorised* — "
-            f"no post fired at 13:00 for week of {friday.strftime('%a %d %b')}.\n"
-            "Open the Reward Time page and click *Authorise reward time* if you "
-            "still want it to go this week (one-shot; authorisation does not "
-            "carry forward)."
+            f"nothing will post for week of {friday.strftime('%a %d %b')} until "
+            "someone clicks *Authorise reward time* on the Reward Time page "
+            "(one-shot; does not carry forward).",
         )
         return
 
@@ -266,41 +306,32 @@ def run_friday_send(channel: str | None = None) -> None:
         logger.info(f"Queue counts — triage={triage}, ics={ics}")
     except Exception as e:
         logger.exception("Queue query failed")
-        _notify_problem(
+        _notify_once(
+            friday, "queuefail",
             f":warning: *Reward time check failed* — could not run the "
-            f"queue query.\n```{type(e).__name__}: {e}```"
+            f"queue query.\n```{type(e).__name__}: {e}```",
         )
-        try:
-            _slack_post(
-                channel,
-                ":warning: Reward time check failed — could not run queue query.",
-            )
-        except Exception:
-            logger.exception("Failed posting failure note to channel")
         return
 
-    # 4. Trigger logic
+    # 4. Trigger logic — if not triggered yet, stay silent and let a later hour
+    # retry (queues often drop through the afternoon). Authorisation is kept so
+    # the next run can still fire. The separate reward-time-friday-check /
+    # hourly-poll tasks already report queue status to the channel, so the send
+    # doesn't post a not-triggered notice itself.
     triggered = triage <= QUEUE_TRIGGER_MAX and ics <= QUEUE_TRIGGER_MAX
-
     if not triggered:
-        _slack_post(channel, render_not_triggered(triage, ics))
-        _notify_status(
-            f":hourglass_flowing_sand: Reward time *not triggered* — "
-            f"triage {triage}, ICS {ics}. Posted the not-triggered message "
-            "to #reward-time-questions-cs. Authorisation cleared; re-authorise "
-            "next week."
-        )
-        clear_authorisation(friday)
+        logger.info(f"Not triggered yet (triage {triage}, ICS {ics}) — will retry.")
         return
 
     # 5. Trigger met — post the team-grouped reward message
     week_data = rt.load_week(friday)
     if not week_data:
         logger.warning("No saved reward week — can't build the team message.")
-        _notify_problem(
+        _notify_once(
+            friday, "noweek",
             f":x: Reward time *triggered* (triage {triage}, ICS {ics}) but "
-            "no saved reward week was found. Open the Reward Time page and "
-            "click *Save week summary* first, then re-authorise next week."
+            "no saved reward week was found — the Reward Time sheet hasn't been "
+            "saved for this week.",
         )
         return
 
@@ -316,11 +347,13 @@ def run_friday_send(channel: str | None = None) -> None:
     if signoff["incomplete"]:
         names = ", ".join(sorted(signoff["incomplete"]))
         logger.warning(f"Incomplete TL sign-off, holding: {names}")
-        _notify_problem(
+        _notify_once(
+            friday, "signoff",
             ":pause_button: *Reward time authorised + triggered, but the "
             "tracker sheet isn't fully signed off* — holding. No Timeline/"
             f"Quality decision yet for: {names}. Fill the *TL View* Timeline "
-            "& Quality columns and it'll post on the next hourly poll."
+            "& Quality columns and it posts automatically on the next hourly "
+            "retry (through 17:00).",
         )
         return
 
@@ -330,17 +363,19 @@ def run_friday_send(channel: str | None = None) -> None:
         _slack_post(channel, msg)
     except Exception as e:
         logger.exception("Reward post failed")
-        _notify_problem(
+        _notify_once(
+            friday, "postfail",
             f":x: Reward time triggered but the post failed.\n"
-            f"```{type(e).__name__}: {e}```"
+            f"```{type(e).__name__}: {e}```",
         )
         return
 
+    _mark_posted(friday)
+    clear_authorisation(friday)
     _notify_status(
         f":white_check_mark: Reward time posted to #reward-time-questions-cs "
         f"(triage {triage}, ICS {ics})."
     )
-    clear_authorisation(friday)
 
 
 def _cli():
