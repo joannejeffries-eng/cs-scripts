@@ -5,15 +5,17 @@ Replaces the `/personal-jo:reward-time-friday-check` scheduled task.
 
 Flow each Friday:
   1. Jo (or whoever is covering) clicks **Authorise reward time** on the
-     Reward Time page sometime between 11:00 (TL timeline-check cutoff) and
-     13:00. This writes an auth_<friday>.json state file.
+     Reward Time page sometime before 13:00. This writes an
+     auth_<friday>.json state file.
   2. This script fires at 13:00 via launchd
      (com.juno.cs-reward-friday-send.plist).
-  3. Authorisation present + TL timeline checks all ✅ + both queues ≤ 50
-     → posts the team-grouped reward message to #reward-time-questions-cs.
+  3. Authorisation present + both queues ≤ 50 → posts the team-grouped reward
+     message to #reward-time-questions-cs. The TLs' Timeline/Quality sign-off
+     is read from the tracker sheet (source of truth); anyone a TL hasn't
+     signed off yet holds the whole post until the sheet is complete.
   4. Trigger not met (either queue > 50) → posts the not-triggered message
      in the same channel.
-  5. Authorisation missing or timelines incomplete → DMs Jo and posts
+  5. Authorisation missing, or sign-off incomplete → DMs Jo and posts
      nothing (one-shot; she has to re-authorise next week).
 
 After a send (either branch) the auth state is cleared so it can't fire
@@ -24,15 +26,19 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import requests
 
 import populate_reward_sheet as prs
 import reward_time as rt
-import timeline_checks as tlc
 from compat import get_postgres_url, get_slack_token
+
+
+def _reward_friday() -> date:
+    """The Friday that starts the just-completed reward week (Fri→Thu)."""
+    return rt.get_reward_friday(date.today() - timedelta(days=1))
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
@@ -188,7 +194,7 @@ def run_friday_send(channel: str | None = None) -> None:
         handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler(sys.stdout)],
     )
 
-    friday = tlc.get_check_friday()
+    friday = _reward_friday()
     logger.info(f"Reward Friday send check for reward week starting {friday}")
 
     # 1. Authorisation
@@ -204,22 +210,8 @@ def run_friday_send(channel: str | None = None) -> None:
         )
         return
 
-    # 2. Timeline checks
-    tl_state = tlc._load_state(friday)
-    if tl_state is None or not tlc.all_teams_complete(tl_state):
-        progress = tlc.team_progress(tl_state) if tl_state else {}
-        missing = [
-            f"{tl}: {p['done']}/{p['total']}"
-            for tl, p in progress.items()
-            if not p["complete"]
-        ]
-        logger.warning(f"Timelines not all ✅: {missing or 'no state file'}")
-        _dm_jo(
-            ":pause_button: *Reward time authorised but timelines not all complete* — "
-            f"holding. Outstanding at 13:00: "
-            f"{', '.join(missing) if missing else 'no timeline state file'}."
-        )
-        return
+    # (TL Timeline/Quality sign-off is no longer a Slack-reaction gate — it's
+    # read from the tracker sheet after the trigger check, in step 5.)
 
     # 3. Queue queries
     try:
@@ -266,24 +258,24 @@ def run_friday_send(channel: str | None = None) -> None:
         return
 
     # Apply the TLs' manual Timeline/Quality sign-off from the tracker sheet —
-    # the sheet is the source of truth. A person is only quality/timeline
-    # confirmed once a TL has picked ✅ Pass (or ⏸️ N/A); Fail and blank both
-    # leave the gate closed. Anyone the TLs haven't signed off is flagged to Jo
-    # so a missing sign-off doesn't silently withhold someone's reward.
-    try:
-        signoff = prs.apply_tl_signoff_from_sheet(week_data, friday)
-        rt.save_week(friday, week_data)  # persist gates so state matches the post
-        if signoff["incomplete"]:
-            names = ", ".join(sorted(signoff["incomplete"]))
-            logger.warning(f"Incomplete TL sign-off: {names}")
-            _dm_jo(
-                ":warning: Posting reward time, but these people have *no "
-                f"Timeline/Quality sign-off* in the tracker yet: {names}. "
-                "They'll show as not-confirmed until a TL fills the sheet — "
-                "nudge the TLs, then I can re-post."
-            )
-    except Exception:
-        logger.exception("TL sign-off read-back failed; using saved gate values")
+    # the sheet is the source of truth (replaces the old Slack-reaction gate).
+    # A person is only quality/timeline confirmed once a TL has picked ✅ Pass
+    # (or ⏸️ N/A); ❌ Fail is a decision (reward denied, fine to post). A blank
+    # cell means the TL hasn't signed off yet — that HOLDS the whole post so we
+    # never publish a summary that wrongly zeroes someone out. Authorisation is
+    # left intact so the hourly poll re-fires once the sheet is complete.
+    signoff = prs.apply_tl_signoff_from_sheet(week_data, friday)
+    rt.save_week(friday, week_data)  # persist gates so state matches the post
+    if signoff["incomplete"]:
+        names = ", ".join(sorted(signoff["incomplete"]))
+        logger.warning(f"Incomplete TL sign-off, holding: {names}")
+        _dm_jo(
+            ":pause_button: *Reward time authorised + triggered, but the "
+            "tracker sheet isn't fully signed off* — holding. No Timeline/"
+            f"Quality decision yet for: {names}. Fill the *TL View* Timeline "
+            "& Quality columns and I'll post on the next hourly poll."
+        )
+        return
 
     try:
         rt.write_week_summary(friday, week_data)
@@ -317,7 +309,7 @@ def _cli():
             "run: post live. run-dry-run: post to #dry-run-testing-jo. "
             "authorise / clear-auth: manage the per-week authorisation state "
             "(normally driven from the Streamlit). status: show current "
-            "authorisation + timeline state."
+            "authorisation + TL sheet sign-off state."
         ),
     )
     p.add_argument(
@@ -328,7 +320,7 @@ def _cli():
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     friday = (
-        date.fromisoformat(args.friday) if args.friday else tlc.get_check_friday()
+        date.fromisoformat(args.friday) if args.friday else _reward_friday()
     )
     print(f"Reward Friday: {friday}")
 
@@ -345,13 +337,15 @@ def _cli():
     elif args.command == "status":
         auth = load_authorisation(friday)
         print(f"Authorisation: {auth or 'NONE'}")
-        tl_state = tlc._load_state(friday)
-        if tl_state is None:
-            print("Timeline checks: no state file")
+        week_data = rt.load_week(friday)
+        if not week_data:
+            print("TL sign-off: no saved reward week")
         else:
-            for tl, p in tlc.team_progress(tl_state).items():
-                tag = "✅" if p["complete"] else f"{p['done']}/{p['total']}"
-                print(f"  {tl}: {tag}")
+            signoff = prs.apply_tl_signoff_from_sheet(week_data, friday)
+            if signoff["incomplete"]:
+                print(f"TL sign-off: incomplete — {', '.join(sorted(signoff['incomplete']))}")
+            else:
+                print("TL sign-off: ✅ complete")
 
 
 if __name__ == "__main__":

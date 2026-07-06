@@ -10,11 +10,12 @@ work is complete. This script:
   2. run_quality_timeline_checks() — computes the quality + timeline
      SUGGESTIONS per person (archive ratio + Cody compliance; work-activity
      gaps).
-  3. Pre-fills those suggestions into the Reward Time tracker sheet's TL View
-     (Timeline + Quality columns), only filling blank cells so a TL's own
-     entry is never clobbered. The sheet is the only reward-time interface now
-     the Streamlit app is retired.
-  4. DMs Jo a summary of who's flagged, ready for Friday review.
+  3. DMs Jo a summary of who's flagged, ready for Friday review.
+
+The TL View Timeline/Quality cells are deliberately NOT pre-filled — the Team
+Leads complete those sign-offs manually in the sheet (the only reward-time
+interface now the Streamlit app is retired). The suggestions are a heads-up
+for Jo only.
 
 Suggestions are also saved to local FS + Google Drive (via save_week's
 dual-write) so the Python eligibility gate + Friday send stay in sync.
