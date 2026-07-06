@@ -46,9 +46,21 @@ SLACK_API = "https://slack.com/api"
 SLACK_CHANNEL_REWARD_QUESTIONS = "C0AS755PW49"  # #reward-time-questions-cs
 SLACK_CHANNEL_DRY_RUN = "C0AUP24HQPP"           # #dry-run-testing-jo
 JO_USER_ID = "U07KFSSCUNT"
+COURTNEY_USER_ID = "U07030XA3NV"                # cover point-person while Jo's away
 
 STATE_DIR = Path.home() / ".juno/scheduled-tasks/reward-time-friday"
 LOG_FILE = STATE_DIR / "reward-friday-send.log"
+
+# Optional "away mode" — while Jo is off, routine status DMs go silent and any
+# PROBLEM (hold / failure) is escalated to #reward-time-questions-cs tagging the
+# cover person instead of DM'ing Jo (who won't see it). Controlled by a JSON
+# file so the window is data, not a code deploy:
+#   ~/.juno/scheduled-tasks/reward-time-friday/away_mode.json
+#   {"from": "2026-07-22", "to": "2026-08-05",
+#    "escalate_channel": "C0AS755PW49", "tag_user_id": "U07030XA3NV"}
+# Active on [from, to) (to = exclusive, i.e. the first day back). Missing file
+# or malformed dates → normal Jo-DM behaviour.
+AWAY_MODE_PATH = STATE_DIR / "away_mode.json"
 
 # Both queues need to be at or below this for reward time to fire.
 QUEUE_TRIGGER_MAX = 50
@@ -143,6 +155,41 @@ def _dm_jo(text: str) -> None:
         logger.exception("DM to Jo failed")
 
 
+def _away_mode() -> dict | None:
+    """Return the away-mode config if today is inside its [from, to) window."""
+    try:
+        cfg = json.loads(AWAY_MODE_PATH.read_text())
+        start = date.fromisoformat(cfg["from"])
+        end = date.fromisoformat(cfg["to"])
+    except Exception:
+        return None
+    return cfg if start <= date.today() < end else None
+
+
+def _notify_problem(text: str) -> None:
+    """Route a hold/failure notice. Normally DMs Jo; in away mode it escalates
+    to the cover channel tagging the cover person so ops don't silently stall."""
+    away = _away_mode()
+    if not away:
+        _dm_jo(text)
+        return
+    channel = away.get("escalate_channel", SLACK_CHANNEL_REWARD_QUESTIONS)
+    tag = away.get("tag_user_id", COURTNEY_USER_ID)
+    try:
+        _slack_post(channel, f"<@{tag}> {text}")
+    except Exception:
+        logger.exception("Away-mode escalation post failed; falling back to DM")
+        _dm_jo(text)
+
+
+def _notify_status(text: str) -> None:
+    """Route a routine (non-problem) status note. Silent in away mode."""
+    if _away_mode():
+        logger.info(f"[away mode — status DM suppressed] {text}")
+        return
+    _dm_jo(text)
+
+
 # ── Queue queries ───────────────────────────────────────────────────────────
 
 
@@ -201,7 +248,7 @@ def run_friday_send(channel: str | None = None) -> None:
     auth = load_authorisation(friday)
     if auth is None:
         logger.info("No authorisation found — holding, no post.")
-        _dm_jo(
+        _notify_problem(
             f":pause_button: *Reward time not authorised* — "
             f"no post fired at 13:00 for week of {friday.strftime('%a %d %b')}.\n"
             "Open the Reward Time page and click *Authorise reward time* if you "
@@ -219,7 +266,7 @@ def run_friday_send(channel: str | None = None) -> None:
         logger.info(f"Queue counts — triage={triage}, ics={ics}")
     except Exception as e:
         logger.exception("Queue query failed")
-        _dm_jo(
+        _notify_problem(
             f":warning: *Reward time check failed* — could not run the "
             f"queue query.\n```{type(e).__name__}: {e}```"
         )
@@ -237,7 +284,7 @@ def run_friday_send(channel: str | None = None) -> None:
 
     if not triggered:
         _slack_post(channel, render_not_triggered(triage, ics))
-        _dm_jo(
+        _notify_status(
             f":hourglass_flowing_sand: Reward time *not triggered* — "
             f"triage {triage}, ICS {ics}. Posted the not-triggered message "
             "to #reward-time-questions-cs. Authorisation cleared; re-authorise "
@@ -250,7 +297,7 @@ def run_friday_send(channel: str | None = None) -> None:
     week_data = rt.load_week(friday)
     if not week_data:
         logger.warning("No saved reward week — can't build the team message.")
-        _dm_jo(
+        _notify_problem(
             f":x: Reward time *triggered* (triage {triage}, ICS {ics}) but "
             "no saved reward week was found. Open the Reward Time page and "
             "click *Save week summary* first, then re-authorise next week."
@@ -269,11 +316,11 @@ def run_friday_send(channel: str | None = None) -> None:
     if signoff["incomplete"]:
         names = ", ".join(sorted(signoff["incomplete"]))
         logger.warning(f"Incomplete TL sign-off, holding: {names}")
-        _dm_jo(
+        _notify_problem(
             ":pause_button: *Reward time authorised + triggered, but the "
             "tracker sheet isn't fully signed off* — holding. No Timeline/"
             f"Quality decision yet for: {names}. Fill the *TL View* Timeline "
-            "& Quality columns and I'll post on the next hourly poll."
+            "& Quality columns and it'll post on the next hourly poll."
         )
         return
 
@@ -283,13 +330,13 @@ def run_friday_send(channel: str | None = None) -> None:
         _slack_post(channel, msg)
     except Exception as e:
         logger.exception("Reward post failed")
-        _dm_jo(
+        _notify_problem(
             f":x: Reward time triggered but the post failed.\n"
             f"```{type(e).__name__}: {e}```"
         )
         return
 
-    _dm_jo(
+    _notify_status(
         f":white_check_mark: Reward time posted to #reward-time-questions-cs "
         f"(triage {triage}, ICS {ics})."
     )
