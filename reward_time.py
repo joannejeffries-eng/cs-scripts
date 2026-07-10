@@ -62,6 +62,7 @@ ROLE_TARGETS = {
     'Triage + uncat':           (100, 140, 'emails_archived'),  # reduced triage — uncat sorting takes time off the queue
     'Triage + email health':    (100, 140, 'emails_archived'),  # reduced triage — email health takes time off the queue
     'Triage + inbound phones':  (100, 140, 'emails_archived'),  # reduced triage — phone cover takes time off the queue
+    'Triage + Webchat':         (100, 140, 'emails_archived'),  # reduced triage — webchat cover takes time off the queue (also exempt from the archive-ratio gate — see _lookup_targets / build_week)
     'Chasing':                  (95, 110, 'outbound_calls'),
     'Case setup only':          (275, 305, 'things_done'),
     'Case setup + uncat':          (230, 260, 'things_done'),   # reduced ICS — secondary eats capacity (numbers provisional, confirm w/ Jo)
@@ -122,7 +123,24 @@ def _lookup_targets(role):
     # Phone compound: "Inbound phones + ..." -> "Inbound phones"
     if role.startswith('Inbound phones'):
         return ROLE_TARGETS.get('Inbound phones')
+    # Triage covering webchat, any label variant ('Triage + Webchat',
+    # 'Triage and Webchat', etc.). Webchat is only a phones secondary in
+    # generate_rota, so a triage-side webchat day arrives via a manual cell
+    # or a logged Slack move — treat it as a reduced-triage compound.
+    rl = role.lower()
+    if 'triage' in rl and 'webchat' in rl:
+        return ROLE_TARGETS['Triage + Webchat']
     return None
+
+
+def _is_webchat_triage(role):
+    """True for a triage day that also covers webchat. Such days are exempt
+    from the archive-ratio gate: web chats aren't archived emails, so they
+    drag the archived/(archived+escalated) ratio down and it stops being a
+    clean triage-quality signal (same rationale the quality-signal pass uses
+    to skip split triage days)."""
+    rl = role.lower()
+    return 'triage' in rl and 'webchat' in rl
 
 # Skip threshold (weekly, pro-rata for days worked)
 SKIP_THRESHOLD_WEEKLY = 50
@@ -406,11 +424,76 @@ def pull_day_data(target_date):
     return dict(results)
 
 
-def pull_skips(friday):
-    """Pull weekly skip counts for the reward week starting on friday.
-    Returns {first_name: skip_count}."""
-    import psycopg2
+# ── Skip classification ─────────────────────────────────────────────────────
+# Skips (work_allocation rows with db_completion_status='cant_do') are split by
+# task type so two categories of *legitimate* skip don't count against reward
+# eligibility. Task type comes from public.doable (doable.id = wa.doable_id):
+# columns db_doable_type / identifier / title.
+#
+#  1. ID-check tasks — excluded ONLY for people who aren't ID-check trained
+#     (they're expected to skip these). Matched on real task/workitem rows,
+#     NOT email subjects (hundreds of triage emails are subjected "Your
+#     identity check for…" — those are ordinary triage, not ID work).
+#  2. The four ICS tasks that are routinely skipped with valid reason —
+#     excluded for everyone.
+#
+# SQL fragment reused in the categorising query.
+_ID_CHECK_SQL = (
+    "d.db_doable_type IN ('task','workitem') AND ("
+    "d.identifier ~* '(id_check|identity|onfido)' OR "
+    "d.title ILIKE 'Failed identity check%%needs reviewing')"
+)
+VALID_ICS_SKIP_IDENTIFIERS = (
+    'set_up_the_case',                        # Set up the case
+    'closed_loop_team_conflict',              # Resolve the team conflict
+    'enter_data_from_the_memorandum_of_sale', # Enter data from the memorandum of sale
+    'investigate_closed_loop_closed_case',    # Investigate the case (closed loop)
+)
 
+# Skills-matrix sheet — the "ID checks" column is the source of truth for who
+# is ID-check trained. Read live (falls back to the constant below on any error
+# so a sheet outage can't silently over-exclude skips).
+SKILLS_MATRIX_SHEET_ID = '14zUquhC8pnnNnLDDbIeFO6vkgfO6CjnGYBrIZCo8iDE'
+ID_TRAINED_FALLBACK = frozenset({
+    'Clare', 'Cris', 'Erika', 'Harriet', 'Lizzie', 'Sophie', 'Tara',
+    'Jess', 'Yasmin', 'Courtney',   # TLs
+})
+
+
+def _id_trained_names():
+    """First names of CS members trained on ID checks, from the skills-matrix
+    'ID checks' column. Falls back to ID_TRAINED_FALLBACK on any read error."""
+    try:
+        import generate_rota as gr
+        gc = gr.get_gspread()
+        ws = gc.open_by_key(SKILLS_MATRIX_SHEET_ID).get_worksheet(0)
+        rows = ws.get_all_values()
+        header_idx = next(i for i, r in enumerate(rows) if 'ID checks' in r)
+        id_col = rows[header_idx].index('ID checks')   # first occurrence
+        trained = set()
+        for r in rows[header_idx + 1:]:
+            if not r or not r[0].strip():
+                continue
+            name = r[0].strip()
+            if name.lower().startswith('total'):
+                break
+            if len(r) > id_col and r[id_col].strip():
+                trained.add(name)
+        if trained:
+            return trained
+        logging.warning("skills matrix parsed but no ID-trained names found; using fallback")
+    except Exception as e:
+        logging.warning(f"skills matrix read failed ({e}); using ID_TRAINED_FALLBACK")
+    return set(ID_TRAINED_FALLBACK)
+
+
+def pull_skips(friday):
+    """Pull weekly *net* skip counts for the reward week starting on friday.
+
+    Returns {first_name: skip_count} after removing legitimate skips:
+      - ID-check tasks for people not trained on ID checks
+      - the four routinely-valid ICS tasks (everyone)
+    Also logs the per-person breakdown so the exclusions are auditable."""
     from compat import get_postgres_url
     db_url = get_postgres_url()
 
@@ -422,29 +505,70 @@ def pull_skips(friday):
     cur = conn.cursor()
     pdt = _find_pdt_table(cur)
 
+    ics_idents = list(VALID_ICS_SKIP_IDENTIFIERS)
     cur.execute(f"""
         WITH staff_map AS (
             SELECT DISTINCT staff_member_id, staff_member_full_name
             FROM {pdt}
             WHERE staff_member_full_name IS NOT NULL
         )
-        SELECT sm.staff_member_full_name, COUNT(DISTINCT wa.id) as skips
+        SELECT sm.staff_member_full_name,
+               CASE
+                 WHEN {_ID_CHECK_SQL} THEN 'id_check'
+                 WHEN d.identifier = ANY(%s) THEN 'ics_valid'
+                 ELSE 'other'
+               END AS category,
+               COUNT(DISTINCT wa.id) AS skips
         FROM public.work_allocation wa
         JOIN public.case_allocation ca ON wa.case_allocation_id = ca.id
         JOIN staff_map sm ON ca.staff_member_id = sm.staff_member_id
+        LEFT JOIN public.doable d ON d.id = wa.doable_id
         WHERE wa.db_completion_status = 'cant_do'
           AND wa.completed_at >= %s AND wa.completed_at < %s
-        GROUP BY 1
-    """, (start, end))
+        GROUP BY 1, 2
+    """, (ics_idents, start, end))
 
-    skips = {}
-    for full_name, skip_count in cur.fetchall():
+    breakdown = defaultdict(lambda: {'id_check': 0, 'ics_valid': 0, 'other': 0})
+    for full_name, category, cnt in cur.fetchall():
         first = FIRST_NAMES.get(full_name)
         if first:
-            skips[first] = skip_count
+            breakdown[first][category] += cnt
 
     conn.close()
+
+    id_trained = _id_trained_names()
+    skips = {}
+    for first, bd in breakdown.items():
+        net, gross, excluded = _net_skips(bd, first in id_trained)
+        skips[first] = net
+        if excluded:
+            logging.info(
+                f"skips {first}: {gross} gross -> {net} net "
+                f"(excluded {', '.join(excluded)})"
+            )
     return skips
+
+
+def _net_skips(breakdown, is_id_trained):
+    """Apply skip exclusions to one person's category breakdown.
+
+    breakdown: {'id_check', 'ics_valid', 'other'} counts.
+    Returns (net, gross, excluded_labels). Valid-ICS skips are always
+    excluded; ID-check skips are excluded only when the person is not
+    ID-trained (an ID-trained person's ID skips still count)."""
+    id_check = breakdown.get('id_check', 0)
+    ics_valid = breakdown.get('ics_valid', 0)
+    other = breakdown.get('other', 0)
+    gross = id_check + ics_valid + other
+    net = other
+    excluded = []
+    if ics_valid:
+        excluded.append(f"{ics_valid} valid-ICS")
+    if is_id_trained:
+        net += id_check
+    elif id_check:
+        excluded.append(f"{id_check} ID-check (untrained)")
+    return net, gross, excluded
 
 
 # ── Timeline gap analysis ───────────────────────────────────────────────────
@@ -1270,7 +1394,7 @@ def build_week(friday, assignments_fri=None, assignments_mon_thu=None,
                     dr.met_base = dr.actual >= dr.target_base
                     dr.met_stretch = dr.actual >= dr.target_stretch
 
-                    if role.startswith('Triage'):
+                    if role.startswith('Triage') and not _is_webchat_triage(role):
                         dr.met_base = dr.met_base and dr.archive_ratio >= TRIAGE_ARCHIVE_RATIO_BASE
                         dr.met_stretch = dr.met_stretch and dr.archive_ratio >= TRIAGE_ARCHIVE_RATIO_STRETCH
 
