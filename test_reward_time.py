@@ -82,5 +82,56 @@ class AutofillHalfDayCaseInsensitive(unittest.TestCase):
         self.assertEqual(applied[0]['name'], 'Sophie')
 
 
+class WebchatTriageTargets(unittest.TestCase):
+    def test_triage_webchat_plus_variant(self):
+        self.assertEqual(rt._lookup_targets('Triage + Webchat'),
+                         (100, 140, 'emails_archived'))
+
+    def test_triage_webchat_and_variant(self):
+        # Label variant ('and' rather than '+') still resolves.
+        self.assertEqual(rt._lookup_targets('Triage and Webchat'),
+                         (100, 140, 'emails_archived'))
+
+    def test_plain_triage_unchanged(self):
+        self.assertEqual(rt._lookup_targets('Triage only'),
+                         (130, 180, 'emails_archived'))
+
+    def test_is_webchat_triage(self):
+        self.assertTrue(rt._is_webchat_triage('Triage + Webchat'))
+        self.assertTrue(rt._is_webchat_triage('Triage and Webchat'))
+        self.assertFalse(rt._is_webchat_triage('Triage only'))
+        self.assertFalse(rt._is_webchat_triage('Triage and Video Calls'))
+        # Webchat on the phones side is not a triage day.
+        self.assertFalse(rt._is_webchat_triage('Inbound phones + Webchat'))
+
+
+class NetSkips(unittest.TestCase):
+    def test_untrained_id_skips_excluded(self):
+        # Kirsty w/e 9 Jul: 37 ID-check + 34 other + 1 → 35 net.
+        bd = {'id_check': 37, 'ics_valid': 0, 'other': 35}
+        net, gross, excluded = rt._net_skips(bd, is_id_trained=False)
+        self.assertEqual((net, gross), (35, 72))
+        self.assertIn('37 ID-check (untrained)', excluded)
+
+    def test_trained_id_skips_counted(self):
+        bd = {'id_check': 37, 'ics_valid': 0, 'other': 35}
+        net, gross, excluded = rt._net_skips(bd, is_id_trained=True)
+        self.assertEqual((net, gross), (72, 72))
+        self.assertEqual(excluded, [])
+
+    def test_valid_ics_always_excluded(self):
+        # Sophie w/e 9 Jul: 8 valid-ICS + 42 other, ID-trained → 42 net.
+        bd = {'id_check': 0, 'ics_valid': 8, 'other': 42}
+        net, gross, excluded = rt._net_skips(bd, is_id_trained=True)
+        self.assertEqual((net, gross), (42, 50))
+        self.assertIn('8 valid-ICS', excluded)
+
+    def test_both_exclusions_untrained(self):
+        bd = {'id_check': 5, 'ics_valid': 3, 'other': 10}
+        net, gross, excluded = rt._net_skips(bd, is_id_trained=False)
+        self.assertEqual((net, gross), (10, 18))
+        self.assertEqual(len(excluded), 2)
+
+
 if __name__ == '__main__':
     unittest.main()
