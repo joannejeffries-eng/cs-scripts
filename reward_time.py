@@ -2172,8 +2172,20 @@ def _update_segments_actuals(dr, person_actuals):
     # Training segments have target_base=0 and their seg.actual is in different
     # units (minutes), so exclude them — otherwise dr.actual would mix calls + minutes.
     dr.actual = sum(s.actual for s in dr.segments if s.target_base > 0)
-    dr.met_base = all_base
-    dr.met_stretch = all_stretch
+    # Standing rule (Jo, 2026-07-16): on a split day where someone takes on an
+    # extra role, judge the DAY on their *base role* — the primary rota role,
+    # which apply_moves always lays down as the first targeted segment. They pass
+    # base if they hit it or land within 1; the added role's segment no longer
+    # gates the day (rewards smashing your own role while covering something
+    # else). See feedback_reward_split_role_base_role memory.
+    targeted = [s for s in dr.segments if s.target_base > 0]
+    if targeted:
+        base_seg = targeted[0]
+        dr.met_base = base_seg.actual >= base_seg.target_base - 1
+        dr.met_stretch = base_seg.met_stretch
+    else:
+        dr.met_base = all_base
+        dr.met_stretch = all_stretch
 
 
 # ── Day adjustment helpers ─────────────────────────────────────────────────
