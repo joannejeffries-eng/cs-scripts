@@ -423,21 +423,28 @@ def _day_effective_targets_and_met(dr, name: str) -> tuple[int, int, bool, bool]
     if not dr.segments:
         return _effective_targets_and_met(dr, name)
     eff_base = eff_stretch = 0
-    base_ok = stretch_ok = True
     any_target = False
+    base_seg = None
     for s in dr.segments:
         if not s.target_base and not s.target_stretch:
             continue  # no-target role (Reward time / Training / Appointment)
         any_target = True
-        eb, es, mb, ms = _effective_targets_and_met(s, name)
+        eb, es, _mb, _ms = _effective_targets_and_met(s, name)
         eff_base += eb
         eff_stretch += es
-        if not mb:
-            base_ok = False
-        if not ms:
-            stretch_ok = False
+        if base_seg is None:
+            base_seg = (s, eb, es)   # first targeted segment = primary rota role
     if not any_target:
         return 0, 0, False, False
+    # Standing rule (Jo, 2026-07-16): on a split day where someone takes on an
+    # extra role, judge the DAY on their *base role* — the primary rota role,
+    # which apply_moves always lays down as the first segment. They pass base if
+    # they hit it or land within 1; the added role's segment no longer gates the
+    # day. Archive ratio isn't gated on split days (can't attribute it to one
+    # role). Combined targets (eff_base/eff_stretch) are still shown to the TL.
+    seg, seg_base, seg_stretch = base_seg
+    base_ok = bool(seg_base) and seg.actual >= seg_base - 1
+    stretch_ok = bool(seg_stretch) and seg.actual >= seg_stretch
     return eff_base, eff_stretch, bool(base_ok), bool(stretch_ok)
 
 
@@ -568,22 +575,10 @@ def _day_outcome(dr, name: str = "") -> str:
         if role in ("Annual leave", "Unplanned absence", "Off", "Training", ""):
             return "🌴 Off"
         return "🌴 Off"
-    # Walk segments (or treat the whole day as one segment) and ask:
-    # did every targeted segment hit base / stretch?
-    segs = dr.segments if dr.segments else [dr]
-    base_ok = True
-    stretch_ok = True
-    any_target = False
-    for s in segs:
-        if not s.target_base and not s.target_stretch:
-            continue  # split-role-only roles like Reward time / Training: no target
-        any_target = True
-        mb, ms = _met_with_rounded_archive(s, name)
-        if not mb:
-            base_ok = False
-        if not ms:
-            stretch_ok = False
-    if not any_target:
+    # Delegate to the day-level verdict so this label always matches the Data
+    # tab's "All Baselines Met?" — including the split-day base-role rule.
+    eff_base, eff_stretch, base_ok, stretch_ok = _day_effective_targets_and_met(dr, name)
+    if not eff_base and not eff_stretch:
         return "🌴 Off"
     if stretch_ok:
         return "⭐ Stretch"
