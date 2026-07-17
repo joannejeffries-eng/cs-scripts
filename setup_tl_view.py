@@ -13,14 +13,16 @@ from pathlib import Path
 
 CREDS_PATH = Path.home() / '.config/juno/claude-code/google-credentials.json'
 
-# CS Team Leads granted editor access on every weekly TL copy (make_tl_copy).
-# Without an explicit grant the copy only inherits the parent folder's domain
-# view-only permission, so TLs can open but not fill Timeline/Quality/Notes or
-# tick the TL Calculator. Keep in sync with the TLs in TL_CALC_TEAMS.
+# Editors granted writer access on every weekly TL copy (make_tl_copy): the
+# three CS Team Leads plus Sam Wilkinson (Head of Ops). Without an explicit
+# grant the copy only inherits the parent folder's domain view-only permission,
+# so they could open but not fill Timeline/Quality/Notes or tick the TL
+# Calculator. Keep in sync with TL_EDITORS in populate_reward_sheet.py.
 TL_EDITOR_EMAILS = [
     'jess.jackson@evenlydistributed.xyz',
     'yasmin.aly@evenlydistributed.xyz',
     'courtney.elijah@evenlydistributed.xyz',
+    'sam.wilkinson@evenlydistributed.xyz',
 ]
 
 # Agent layout matches fill_tracker.py
