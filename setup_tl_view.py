@@ -13,6 +13,16 @@ from pathlib import Path
 
 CREDS_PATH = Path.home() / '.config/juno/claude-code/google-credentials.json'
 
+# CS Team Leads granted editor access on every weekly TL copy (make_tl_copy).
+# Without an explicit grant the copy only inherits the parent folder's domain
+# view-only permission, so TLs can open but not fill Timeline/Quality/Notes or
+# tick the TL Calculator. Keep in sync with the TLs in TL_CALC_TEAMS.
+TL_EDITOR_EMAILS = [
+    'jess.jackson@evenlydistributed.xyz',
+    'yasmin.aly@evenlydistributed.xyz',
+    'courtney.elijah@evenlydistributed.xyz',
+]
+
 # Agent layout matches fill_tracker.py
 # Data tab rows: Core Phones start at row 4 (1-indexed), Wider Team at row 9
 # (row 8 is the "WIDER TEAM" section header)
@@ -1070,6 +1080,21 @@ def make_tl_copy(service, source_spreadsheet_id, name_prefix='TL View - '):
         service.spreadsheets().batchUpdate(
             spreadsheetId=new_id, body={'requests': requests}
         ).execute()
+
+    # Grant the CS Team Leads editor access on the copy so they can fill
+    # Timeline/Quality/Notes and tick the TL Calculator. sendNotificationEmail
+    # is off — TLs reach the copy via the weekly Slack post, not an email each
+    # week. A single failed grant must not lose the whole copy, so warn and go on.
+    for email in TL_EDITOR_EMAILS:
+        try:
+            drive.permissions().create(
+                fileId=new_id,
+                body={'type': 'user', 'role': 'writer', 'emailAddress': email},
+                sendNotificationEmail=False,
+                fields='id',
+            ).execute()
+        except Exception as e:
+            print(f'  WARN: could not grant {email} editor access to TL copy: {e}')
 
     return f'https://docs.google.com/spreadsheets/d/{new_id}'
 
