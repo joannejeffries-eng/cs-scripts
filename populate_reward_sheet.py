@@ -48,10 +48,13 @@ JO_USER_ID = "U07KFSSCUNT"
 # week's TL View. The CS Reward Time folder is shared read-only to the domain,
 # and a Drive copy inherits only the folder's permissions — so each new week's
 # sheet must be explicitly granted writer to the TLs or they can only view it.
+# The three CS Team Leads plus Sam Wilkinson (Head of Ops) get writer access
+# to every weekly reward sheet. Edits are covered by Google's version history.
 TL_EDITORS = [
     "jess.jackson@evenlydistributed.xyz",
     "yasmin.aly@evenlydistributed.xyz",
     "courtney.elijah@evenlydistributed.xyz",
+    "sam.wilkinson@evenlydistributed.xyz",
 ]
 
 # Order Data + TL View rows so the 6 Core Phones land in the first 6
