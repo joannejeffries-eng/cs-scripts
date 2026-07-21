@@ -18,6 +18,12 @@ GOOGLE_CREDS_LOCAL_PATH = Path.home() / '.config/juno/claude-code/google-credent
 LOOKER_POSTGRES_LOCAL_PATH = Path.home() / '.config/juno/claude-code/looker-postgres-url'
 LOOKER_POSTGRES_ENV_VAR = 'STAFF_APP_LOOKER_POSTGRES_URL'
 
+# Shared shell env file that exports the Looker REST API creds (LOOKERSDK_*).
+# The reward-time-backup agent sources this via its wrapper script; the
+# daily-actuals / refresh daemons run python directly and do NOT, so anything
+# needing the Looker *API* (not just Postgres) must load it explicitly.
+SHARED_ENV_FILE = Path.home() / '.juno/.juno-claude-skills-environment.sh'
+
 
 def _secrets():
     """Return st.secrets if Streamlit is loaded and has secrets; else None.
@@ -79,6 +85,60 @@ def get_postgres_url() -> str:
         f"{LOOKER_POSTGRES_ENV_VAR} env var (local), or "
         f"create {LOOKER_POSTGRES_LOCAL_PATH} (for the refresh daemon)."
     )
+
+
+_LOOKER_API_VARS = (
+    'LOOKERSDK_BASE_URL',
+    'LOOKERSDK_CLIENT_ID',
+    'LOOKERSDK_CLIENT_SECRET',
+    'LOOKERSDK_VERIFY_SSL',
+    'LOOKERSDK_TIMEOUT',
+)
+
+
+def ensure_looker_api_env() -> bool:
+    """Make sure the Looker REST API creds (LOOKERSDK_*) are in os.environ.
+
+    Cloud/interactive shells already export them. Daemons that run python
+    directly (daily-actuals, refresh) do not, so source them from the shared
+    env file as a fallback. Best-effort: only fills vars that are missing and
+    never overwrites one already set. Returns True if the base URL + client
+    creds are present afterwards.
+
+    The file is `KEY=VALUE` / `export KEY=VALUE` shell lines — we parse the
+    LOOKERSDK_* ones directly rather than spawning a shell.
+    """
+    def _have_creds() -> bool:
+        return all(os.environ.get(k) for k in _LOOKER_API_VARS[:3])
+
+    if _have_creds():
+        return True
+
+    # Cloud path: pull from st.secrets if present.
+    for k in _LOOKER_API_VARS:
+        if not os.environ.get(k):
+            v = get_secret_str(k)
+            if v:
+                os.environ[k] = v
+    if _have_creds():
+        return True
+
+    if SHARED_ENV_FILE.exists():
+        for raw in SHARED_ENV_FILE.read_text().splitlines():
+            line = raw.strip()
+            if line.startswith('export '):
+                line = line[len('export '):]
+            if '=' not in line:
+                continue
+            key, _, val = line.partition('=')
+            key = key.strip()
+            if key not in _LOOKER_API_VARS or os.environ.get(key):
+                continue
+            val = val.strip().strip('"').strip("'")
+            if val:
+                os.environ[key] = val
+
+    return _have_creds()
 
 
 def get_google_credentials():
