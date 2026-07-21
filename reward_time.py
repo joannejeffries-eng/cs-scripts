@@ -352,6 +352,55 @@ def _find_pdt_table(cur):
     return best_table
 
 
+def _apply_things_done(results, things_by_person):
+    """Merge a {first_name: {completed_method: count}} map into results as the
+    emails_archived / things_done / archive_ratio metrics. Identical maths
+    whether the counts came from Postgres or the Looker API."""
+    for first, methods in things_by_person.items():
+        archived = methods.get('email archived', 0)
+        escalated = methods.get('email escalated', 0)
+        email_total = archived + escalated
+        results[first]['emails_archived'] = archived
+        results[first]['things_done'] = sum(methods.values())
+        results[first]['archive_ratio'] = archived / email_total if email_total > 0 else 0.0
+
+
+def _things_done_from_looker(target_date):
+    """Fallback source for a day's things-done via the Looker REST API.
+
+    Mirrors the Postgres PDT query — group by staff full name + completed
+    method — and returns the same {first_name: {method: count}} shape, so
+    _apply_things_done runs unchanged. Used when the looker_scratch PDT is
+    present but forbidden to our reporting role after a Looker rebuild.
+    """
+    import compat
+    if not compat.ensure_looker_api_env():
+        raise RuntimeError(
+            "things-done PDT unreadable from Postgres and no Looker API creds "
+            "for the fallback — need LOOKERSDK_* in the environment or "
+            f"{compat.SHARED_ENV_FILE}."
+        )
+    import reward_backup
+    lk = reward_backup.Looker()
+    rng = f"{target_date.isoformat()} to {(target_date + timedelta(days=1)).isoformat()}"
+    names = ', '.join(DB_NAMES.values())
+    things_by_person = defaultdict(lambda: defaultdict(int))
+    for row in lk.run(
+        'pdt_things_done_by_person',
+        ['pdt_things_done_by_person.staff_member_full_name',
+         'pdt_things_done_by_person.completed_method',
+         'pdt_things_done_by_person.count'],
+        {'pdt_things_done_by_person.completed_date': rng,
+         'pdt_things_done_by_person.staff_member_full_name': names},
+    ):
+        first = FIRST_NAMES.get(row['pdt_things_done_by_person.staff_member_full_name'])
+        if not first:
+            continue
+        method = row['pdt_things_done_by_person.completed_method'] or ''
+        things_by_person[first][method] += int(row['pdt_things_done_by_person.count'] or 0)
+    return things_by_person
+
+
 def pull_day_data(target_date):
     """Pull throughput data for a single day from Looker/Postgres.
     Returns {first_name: {metric: value}}."""
@@ -362,10 +411,8 @@ def pull_day_data(target_date):
 
     conn = _connect_postgres(db_url)
     cur = conn.cursor()
-    pdt = _find_pdt_table(cur)
 
     start = target_date
-    end = target_date + timedelta(days=1)
     results = defaultdict(dict)
 
     # Phone calls (inbound)
@@ -398,27 +445,36 @@ def pull_day_data(target_date):
         if first:
             results[first]['outbound_calls'] = count
 
-    # Things done (triage emails archived, total things done for ICS)
-    cur.execute(f"""
-        SELECT staff_member_full_name, completed_method, COUNT(*) as cnt
-        FROM {pdt}
-        WHERE DATE(doable_or_enquiry_action_completed_at) = %s
-          AND staff_member_full_name IS NOT NULL
-        GROUP BY 1, 2
-    """, (start,))
+    # Things done (triage emails archived, total things done for ICS).
+    # Read the looker_scratch PDT directly. If it's unreadable — Looker
+    # periodically rebuilds it, and a rebuild under a role whose new tables
+    # carry no SELECT grant for us leaves it present-but-forbidden — fall back
+    # to the same figures via the Looker REST API, which reads through Looker's
+    # own connection and is unaffected by the grant gap.
     things_by_person = defaultdict(lambda: defaultdict(int))
-    for full_name, method, cnt in cur.fetchall():
-        first = FIRST_NAMES.get(full_name)
-        if first:
-            things_by_person[first][method] = cnt
+    try:
+        pdt = _find_pdt_table(cur)
+        cur.execute(f"""
+            SELECT staff_member_full_name, completed_method, COUNT(*) as cnt
+            FROM {pdt}
+            WHERE DATE(doable_or_enquiry_action_completed_at) = %s
+              AND staff_member_full_name IS NOT NULL
+            GROUP BY 1, 2
+        """, (start,))
+        for full_name, method, cnt in cur.fetchall():
+            first = FIRST_NAMES.get(full_name)
+            if first:
+                things_by_person[first][method or ''] = cnt
+    except (RuntimeError, psycopg2.Error) as e:
+        conn.rollback()
+        detail = (str(e).splitlines()[0] if str(e).strip() else type(e).__name__)
+        logging.warning(
+            f"things-done PDT unreadable from Postgres ({type(e).__name__}: "
+            f"{detail}); falling back to Looker REST API"
+        )
+        things_by_person = _things_done_from_looker(target_date)
 
-    for first, methods in things_by_person.items():
-        results[first]['emails_archived'] = methods.get('email archived', 0)
-        results[first]['things_done'] = sum(methods.values())
-        archived = methods.get('email archived', 0)
-        escalated = methods.get('email escalated', 0)
-        email_total = archived + escalated
-        results[first]['archive_ratio'] = archived / email_total if email_total > 0 else 0.0
+    _apply_things_done(results, things_by_person)
 
     conn.close()
     return dict(results)
@@ -503,14 +559,19 @@ def pull_skips(friday):
 
     conn = _connect_postgres(db_url)
     cur = conn.cursor()
-    pdt = _find_pdt_table(cur)
 
+    # staff_member_id -> full name. Read from public.staff_member rather than
+    # the things-done PDT: skips don't need throughput data, only the name
+    # map, and the PDT can be present-but-forbidden after a Looker rebuild
+    # (see pull_day_data). staff_member is a plain public table, always
+    # readable, so this path stays up regardless of PDT grants.
     ics_idents = list(VALID_ICS_SKIP_IDENTIFIERS)
     cur.execute(f"""
         WITH staff_map AS (
-            SELECT DISTINCT staff_member_id, staff_member_full_name
-            FROM {pdt}
-            WHERE staff_member_full_name IS NOT NULL
+            SELECT id AS staff_member_id,
+                   concat(first_name, ' ', last_name) AS staff_member_full_name
+            FROM public.staff_member
+            WHERE first_name IS NOT NULL
         )
         SELECT sm.staff_member_full_name,
                CASE
@@ -663,7 +724,6 @@ def pull_activity_events(friday, include_history=False):
 
     conn = _connect_postgres(db_url)
     cur = conn.cursor()
-    pdt = _find_pdt_table(cur)
 
     events = defaultdict(list)  # first_name -> [(ts, event_type)]
 
@@ -674,20 +734,30 @@ def pull_activity_events(friday, include_history=False):
         if first:
             events[first].append((_to_local_naive(ts), etype))
 
-    # staff_member_id -> full_name (same source as pull_skips)
+    # staff_member_id -> full_name (same source as pull_skips: the plain
+    # public table, so this survives even when the things-done PDT is
+    # present-but-forbidden after a Looker rebuild).
     id_to_name = {}
     try:
-        cur.execute(f"""
-            SELECT DISTINCT staff_member_id, staff_member_full_name
-            FROM {pdt}
-            WHERE staff_member_full_name IS NOT NULL
+        cur.execute("""
+            SELECT id, concat(first_name, ' ', last_name)
+            FROM public.staff_member
+            WHERE first_name IS NOT NULL
         """)
         id_to_name = {sid: name for sid, name in cur.fetchall()}
     except Exception as e:
+        conn.rollback()
         logging.warning(f"pull_activity_events: staff map failed: {e}")
 
-    # 1. Things done (pdt)
+    # 1. Things done (looker_scratch PDT). Resolved lazily and defensively:
+    # if the PDT is missing or forbidden (see pull_day_data) we skip this
+    # source rather than crash the whole timeline — the phone and
+    # case-allocation events below still populate it. While the PDT is
+    # unreadable, triage/ICS "things done" are absent from the gap picture,
+    # so gaps for desk-only roles can read longer than reality until PDT
+    # grants are restored.
     try:
+        pdt = _find_pdt_table(cur)
         cur.execute(f"""
             SELECT staff_member_full_name, completed_method,
                    doable_or_enquiry_action_completed_at
@@ -699,7 +769,11 @@ def pull_activity_events(friday, include_history=False):
         for full_name, method, ts in cur.fetchall():
             add(full_name, ts, method or 'thing_done')
     except Exception as e:
-        logging.warning(f"pull_activity_events: pdt events failed: {e}")
+        conn.rollback()
+        logging.warning(
+            f"pull_activity_events: things-done source skipped "
+            f"({type(e).__name__}); phone + case events only"
+        )
 
     # 2. Phone activity (start + end so long calls don't read as gaps)
     try:
