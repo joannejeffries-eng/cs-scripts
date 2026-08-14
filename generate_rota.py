@@ -11,6 +11,7 @@ Writes to the "test rota" Google Sheet. Never touches the original rota.
 """
 import sys
 import os
+import re
 import json
 import argparse
 from datetime import datetime, date, timedelta
@@ -792,6 +793,28 @@ def read_config_tl_rotation(gc, sheet_id):
     return rotation
 
 
+_NAME_ANNOTATION_RE = re.compile(r'(\s+[-–—]|\s*[:(\n])')
+
+
+def canon_agent_name(raw):
+    """Reduce a rota header cell to the bare first name.
+
+    Header cells sometimes carry an inline annotation — e.g.
+    'Clare - Triage and ICS only right now ' — and keying the assignments dict
+    under that raw string silently drops the person from every caller, since
+    they all look up a bare first name. On 2026-08-14 that made the reward
+    tracker read Clare as Off for the whole week.
+
+    Only splits on a separator that follows whitespace (or an opening bracket),
+    so a hyphenated first name like 'Anne-Marie' survives intact.
+    """
+    name = raw.strip()
+    m = _NAME_ANNOTATION_RE.search(name)
+    if m:
+        name = name[:m.start()]
+    return name.strip()
+
+
 def read_original_rota(gc, monday):
     """Read the full rota from the original rota sheet for a given week.
 
@@ -812,9 +835,12 @@ def read_original_rota(gc, monday):
     # Noemi + Kirsty once the team passed 22.
     agent_cols = {}
     for idx in range(2, len(header)):
-        name = header[idx].strip()
-        if not name:
+        raw = header[idx].strip()
+        if not raw:
             break  # blank column = end of the agent block
+        name = canon_agent_name(raw)
+        if name != raw:
+            print(f"  Rota header '{raw}' read as '{name}'")
         agent_cols[name] = idx
 
     week_dates = {monday + timedelta(days=i): i for i in range(5)}
@@ -895,9 +921,12 @@ def read_absences_from_original(gc, monday):
     # Noemi + Kirsty once the team passed 22.
     agent_cols = {}
     for idx in range(2, len(header)):
-        name = header[idx].strip()
-        if not name:
+        raw = header[idx].strip()
+        if not raw:
             break  # blank column = end of the agent block
+        name = canon_agent_name(raw)
+        if name != raw:
+            print(f"  Rota header '{raw}' read as '{name}'")
         agent_cols[name] = idx
 
     week_dates = {monday + timedelta(days=i): i for i in range(5)}
@@ -937,7 +966,7 @@ def read_staff_view(gc, sheet_id):
     agent_cols = {}
     all_names = ALL_TLS + ALL_AGENTS
     for idx, cell in enumerate(header):
-        name = cell.strip()
+        name = canon_agent_name(cell)
         if name in all_names and name not in agent_cols:
             agent_cols[name] = idx
 
