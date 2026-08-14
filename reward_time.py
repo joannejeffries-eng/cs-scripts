@@ -1418,6 +1418,19 @@ def build_week(friday, assignments_fri=None, assignments_mon_thu=None,
         pw.weekly_hours = WEEKLY_HOURS.get(name, 40)
         pw.skips = skips.get(name, 0)
 
+        # A name absent from the rota read entirely (as opposed to present with
+        # blank cells) means the column was missed — an annotated header, a
+        # rename, a truncated read. Left unflagged that person reads as Off for
+        # the whole week and loses their reward, which is what happened to Clare
+        # on 2026-08-14. Blank-but-present columns are normal (new starters not
+        # yet rota'd) and stay quiet.
+        for label, src in (('Fri', assignments_fri), ('Mon-Thu', assignments_mon_thu)):
+            if src and name not in src:
+                logging.warning(
+                    "%s has no column in the %s rota read — check that person's "
+                    "rota header; they will otherwise read as Off all week",
+                    name, label)
+
         fri_roles = assignments_fri.get(name, {})
         mon_thu_roles = assignments_mon_thu.get(name, {})
         days_worked = 0
